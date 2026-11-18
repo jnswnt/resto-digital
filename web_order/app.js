@@ -36,6 +36,10 @@ try {
   console.warn("Firestore inisialisasi tertunda / mode fallback:", err);
 }
 
+// 1.0 KONFIGURASI SAAS BACKEND PROXY (RESTO-API)
+const SAAS_BACKEND_API = "https://resto-api.ipankhub.web.id";
+let socketClient = null;
+
 // 1.1 DETEKSI RESTO ID (MULTI-TENANT ISOLATION)
 // Membaca ID Resto dari query URL (?resto=...) atau LocalStorage agar data menu dan pesanan
 // terpisah antar restoran meskipun menggunakan domain/proyek web order yang sama.
@@ -43,6 +47,30 @@ const urlParamsGlobal = new URLSearchParams(window.location.search);
 let currentRestoId = (urlParamsGlobal.get("resto") || urlParamsGlobal.get("r") || localStorage.getItem("pos_resto_id") || "default").trim();
 if (urlParamsGlobal.get("resto") || urlParamsGlobal.get("r")) {
   localStorage.setItem("pos_resto_id", currentRestoId);
+}
+
+// Inisialisasi Socket.IO Client ke Server SaaS Backend
+try {
+  if (typeof io !== 'undefined') {
+    socketClient = io(SAAS_BACKEND_API, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+    });
+    socketClient.on('connect', () => {
+      console.log('[SaaS Socket] Terhubung ke SaaS Backend:', SAAS_BACKEND_API);
+      socketClient.emit('join_resto', { restoId: currentRestoId, role: 'guest' });
+    });
+    socketClient.on('order_status_updated', (data) => {
+      console.log('[SaaS Socket] Status pesanan diperbarui:', data);
+      if (activeOrderId && (data.orderId === activeOrderId || activeOrderId.includes(data.orderId))) {
+        if (typeof updateTrackerVisuals === 'function') {
+          updateTrackerVisuals(data.status || data.kitchenStatus);
+        }
+      }
+    });
+  }
+} catch (err) {
+  console.warn('[SaaS Socket] Inisialisasi socket offline/tertunda:', err);
 }
 
 /**
@@ -1033,6 +1061,21 @@ async function sendCallWaiter() {
     console.warn("Koneksi cloud Firestore lambat/offline:", err);
   }
 
+  // Kirim panggilan pelayan ke Server SaaS Backend Proxy (resto-api.ipankhub.web.id)
+  try {
+    fetch(`${SAAS_BACKEND_API}/api/waiter-call`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        restoId: currentRestoId,
+        tableNo: tableNumber,
+        reason: `${selectedWaiterRequestType}${customNote ? ' (' + customNote + ')' : ''}`,
+      }),
+    }).catch((e) => console.warn("[SaaS API] Gagal kirim panggilan pelayan:", e));
+  } catch (apiErr) {
+    console.warn("[SaaS API] Error fetch waiter-call:", apiErr);
+  }
+
   playAudioChime("chime");
   alert(`Panggilan pelayan untuk Meja ${tableNumber} berhasil dikirim! Pelayan resto segera datang membawakan: ${selectedWaiterRequestType}`);
   callWaiterModalEl.style.display = "none";
@@ -1184,20 +1227,35 @@ async function submitOrder() {
   }
   isAdditionalOrderMode = false;
 
-  // 2. Kirim ke Cloud Firestore dengan proteksi timeout 5 detik
+  // 2.1 Kirim ke SaaS Backend Proxy (https://resto-api.ipankhub.web.id)
   try {
-    if (db) {
-      const ordersCol = getRestoCollection("table_orders");
-      if (ordersCol) {
-        await withTimeout(
-          ordersCol.doc(orderId).set(orderData),
-          5000,
-          "Waktu koneksi cloud habis, pesanan dialihkan ke antrean lokal."
-        );
-      }
-    }
-  } catch (err) {
-    console.warn("Koneksi cloud Firestore lambat atau gagal, pesanan tetap diproses via data lokal:", err);
+    const apiPayload = {
+      restoId: currentRestoId,
+      tableNo: tableNumber,
+      customerName: customerName,
+      items: cart.map(i => ({
+        productId: i.id,
+        productName: i.name,
+        price: i.price,
+        quantity: i.qty,
+        notes: i.note || ""
+      })),
+      subtotal: totalAmount,
+      totalPrice: totalAmount,
+      paymentMethod: selectedPaymentMethod,
+      orderId: orderId,
+    };
+    fetch(`${SAAS_BACKEND_API}/api/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(apiPayload)
+    }).then(r => r.json()).then(d => {
+      console.log("[SaaS API] Pesanan berhasil disimpan di SaaS Backend:", d);
+    }).catch(apiErr => {
+      console.warn("[SaaS API] Gagal kirim pesanan ke backend proxy:", apiErr);
+    });
+  } catch (apiEx) {
+    console.warn("[SaaS API] Exception kirim order:", apiEx);
   }
 
   // 3. Selesaikan checkout & buka pelacak status pesanan

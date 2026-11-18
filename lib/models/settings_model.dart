@@ -69,7 +69,7 @@ class SettingsModel {
     this.restoId = 'default',
     this.firebaseProjectId = 'restodigital-pos',
     this.firebaseApiKey = 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
-    this.webOrderBaseUrl = 'https://restodigital-pos.web.app',
+    this.webOrderBaseUrl = 'https://order.ipankhub.web.id',
     this.isCloudSyncEnabled = true,
     // Nilai default untuk Pajak PB1 & Service Charge
     this.enableTax = false,
@@ -143,7 +143,7 @@ class SettingsModel {
       restoId: map['restoId'] ?? 'default',
       firebaseProjectId: map['firebaseProjectId'] ?? 'restodigital-pos',
       firebaseApiKey: map['firebaseApiKey'] ?? 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
-      webOrderBaseUrl: map['webOrderBaseUrl'] ?? 'https://restodigital-pos.web.app',
+      webOrderBaseUrl: map['webOrderBaseUrl'] ?? 'https://order.ipankhub.web.id',
       isCloudSyncEnabled: map['isCloudSyncEnabled'] ?? true,
       enableTax: map['enableTax'] ?? false,
       taxPercentage: (map['taxPercentage'] as num?)?.toDouble() ?? 10.0,
