@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Pesan Menu - Resto Digital</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- HEADER TOKO & MEJA -->
+  <header class="app-header">
+    <div class="header-top">
+      <div class="brand-info">
+        <div class="brand-logo">🍽️</div>
+        <div>
+          <h1 class="store-name" id="storeName">Resto Digital</h1>
+          <p class="store-desc" id="storeDesc">Pesan Mandiri dari Meja</p>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button class="header-track-btn" id="headerTrackOrderBtn" style="display: none;" title="Pantau Status Pesanan">
+          <span class="live-dot-pulse"></span>
+          <span>📋 Pantau Pesanan</span>
+        </button>
+        <div class="table-badge" id="tableBadge">
+          <span class="table-icon">🪑</span>
+          <span class="table-text" id="tableText">Meja --</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PENCARIAN & KATEGORI -->
+    <div class="search-bar-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" placeholder="Cari makanan atau minuman..." autocomplete="off">
+      <button class="clear-search-btn" id="clearSearchBtn" style="display: none;">✕</button>
+    </div>
+
+    <nav class="categories-nav" id="categoriesNav">
+      <button class="category-chip active" data-category="all">Semua Menu</button>
+      <!-- Diisi dinamis oleh JavaScript -->
+    </nav>
+  </header>
+
+  <!-- KATALOG MENU UTAMA -->
+  <main class="main-content">
+    <div class="menu-grid" id="menuGrid">
+      <!-- Skeleton Loading atau Daftar Menu di-render di sini -->
+      <div class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Menyiapkan menu lezat untuk Anda...</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- FLOATING CALL WAITER FAB -->
+  <button class="call-waiter-fab" id="callWaiterFab" title="Panggil Pelayan">
+    <span class="fab-icon">🔔</span>
+    <span class="fab-text">Panggil Pelayan</span>
+  </button>
+
+  <!-- FLOATING CART BAR (MUNCUL JIKA ADA ITEM) -->
+  <div class="floating-cart-bar" id="floatingCartBar" style="display: none;">
+    <div class="cart-info">
+      <div class="cart-badge-count" id="cartBadgeCount">0</div>
+      <div class="cart-price-info">
+        <span class="cart-total-label">Total Tagihan</span>
+        <span class="cart-total-amount" id="cartTotalAmount">Rp 0</span>
+      </div>
+    </div>
+    <button class="view-cart-btn" id="viewCartBtn">
+      <span>Lihat Pesanan</span>
+      <span class="cart-btn-arrow">→</span>
+    </button>
+  </div>
+
+  <!-- FLOATING BAR STATUS PESANAN MEJA (HANYA MUNCUL JIKA ADA PESANAN AKTIF) -->
+  <div class="active-order-floating-bar" id="activeOrderFloatingBar" style="display: none;">
+    <div class="aofb-content">
+      <span class="aofb-pulse"></span>
+      <span class="aofb-icon" id="aofbIcon">🍳</span>
+      <div class="aofb-text-wrap">
+        <div class="aofb-status-line">
+          <strong id="aofbStatusTitle">Sedang Dimasak</strong>
+          <span class="aofb-round-badge" id="aofbRoundBadge">Round 1</span>
+        </div>
+        <div class="aofb-total-line">
+          Total Meja: <strong id="aofbTotalAmount">Rp 0</strong>
+        </div>
+      </div>
+    </div>
+    <button class="aofb-btn" id="openTrackerFromFloatingBtn">
+      <span>Pantau Pesanan</span>
+      <span class="aofb-arrow">🔍</span>
+    </button>
+  </div>
+
+  <!-- MODAL PANGGIL PELAYAN (CALL WAITER) -->
+  <div class="modal-overlay" id="callWaiterModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.3rem;">🔔</span>
+          <h3>Panggil Bantuan Pelayan</h3>
+        </div>
+        <button class="modal-close-btn" id="closeCallWaiterModalBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-subtitle">Pilih jenis bantuan yang Anda butuhkan untuk <strong id="callWaiterTableText">Meja --</strong>:</p>
+        <div class="waiter-request-options" id="waiterRequestOptions">
+          <div class="request-option-item selected" data-type="Sendok / Garpu / Piring">
+            <span class="req-icon">🥣</span>
+            <div class="req-content">
+              <strong>Sendok / Garpu / Piring</strong>
+              <span>Minta alat makan tambahan</span>
+            </div>
+          </div>
+          <div class="request-option-item" data-type="Refill Air / Es Batu">
+            <span class="req-icon">🧊</span>
+            <div class="req-content">
+              <strong>Refill Air Minum / Es Batu</strong>
+              <span>Minta tambahan es batu atau air</span>
+            </div>
+          </div>
+          <div class="request-option-item" data-type="Minta Tagihan / Bill Kasir">
+            <span class="req-icon">🧾</span>
+            <div class="req-content">
+              <strong>Minta Tagihan / Bill Kasir</strong>
+              <span>Pelayan membawakan struk ke meja</span>
+            </div>
+          </div>
+          <div class="request-option-item" data-type="Bantuan Staf Pelayan">
+            <span class="req-icon">🙋‍♂️</span>
+            <div class="req-content">
+              <strong>Bantuan Staf Pelayan</strong>
+              <span>Panggil staf resto datang ke meja</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: 14px;">
+          <label for="callWaiterCustomNote">Catatan Tambahan (Opsional):</label>
+          <input type="text" id="callWaiterCustomNote" placeholder="Contoh: Minta 2 sendok kecil & tisu...">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="primary-btn" id="sendCallWaiterBtn">
+          <span>Kirim Panggilan ke Kasir</span>
+          <span class="btn-icon">🔔</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CATATAN / MODIFIERS PESANAN -->
+  <div class="modal-overlay" id="notesModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="notesModalTitle">Catatan Pesanan</h3>
+        <button class="modal-close-btn" id="closeNotesModalBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-subtitle">Kustomisasi selera rasa hidangan Anda:</p>
+        <div class="quick-tags-wrap" id="quickTagsWrap">
+          <button class="quick-tag" data-note="Pedas Sedang">🌶️ Pedas Sedang</button>
+          <button class="quick-tag" data-note="Pedas Banget">🔥 Pedas Banget</button>
+          <button class="quick-tag" data-note="Tidak Pedas">🚫 Tidak Pedas</button>
+          <button class="quick-tag" data-note="Pisah Kuah / Sambal">🥣 Pisah Kuah/Sambal</button>
+          <button class="quick-tag" data-note="Tanpa MSG">🌿 Tanpa MSG</button>
+          <button class="quick-tag" data-note="Sedikit Minyak">💧 Sedikit Minyak</button>
+          <button class="quick-tag" data-note="Es Batu Sedikit">🧊 Es Sedikit</button>
+          <button class="quick-tag" data-note="Tanpa Es (Hangat)">☕ Hangat</button>
+          <button class="quick-tag" data-note="Gula Sedikit">🍯 Gula Sedikit</button>
+          <button class="quick-tag" data-note="Bungkus (Take Away)">🥡 Bungkus (Take Away)</button>
+        </div>
+        <textarea id="itemNotesInput" rows="3" placeholder="Tulis catatan khusus lainnya (opsional)..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="primary-btn" id="saveNotesBtn">Simpan Catatan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL RINCIAN KERANJANG & CHECKOUT -->
+  <div class="modal-overlay" id="checkoutModal" style="display: none;">
+    <div class="modal-sheet">
+      <div class="sheet-drag-handle"></div>
+      <div class="modal-header">
+        <h3>Rincian Pesanan Meja</h3>
+        <button class="modal-close-btn" id="closeCheckoutModalBtn">✕</button>
+      </div>
+      <div class="modal-body sheet-body">
+        <div class="order-table-reminder">
+          <span class="reminder-icon">📍</span>
+          <div>
+            <span class="reminder-title">Nomor Meja Anda:</span>
+            <strong id="checkoutTableNo">Meja --</strong>
+          </div>
+          <button class="btn-change-table" id="changeTableBtn">Ubah</button>
+        </div>
+
+        <!-- BANNER MODE PESANAN TAMBAHAN (ROUND 2) -->
+        <div class="round-notice-banner" id="roundNoticeBanner" style="display: none;">
+          <span class="round-notice-icon">🔄</span>
+          <div>
+            <strong>Pesanan Tambahan</strong> <span class="round-badge-pill" id="roundBadgePill">Menu Baru</span>
+            <p style="font-size: 0.74rem; margin: 2px 0 0; opacity: 0.95;">Item baru ini akan langsung digabung ke tagihan meja yang sama di kasir.</p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="customerNameInput">Nama Pemesan <span class="required">*</span></label>
+          <input type="text" id="customerNameInput" placeholder="Masukkan nama Anda (misal: Budi)" required>
+        </div>
+
+        <div class="order-items-list" id="orderItemsList">
+          <!-- Item keranjang di-render di sini -->
+        </div>
+
+        <!-- PILIHAN METODE PEMBAYARAN -->
+        <div class="payment-method-section">
+          <label class="section-label">Metode Pembayaran:</label>
+          <div class="payment-options-grid">
+            <label class="payment-option-card active">
+              <input type="radio" name="paymentMethod" value="cashier" checked>
+              <div class="payment-card-content">
+                <span class="pay-icon">🏪</span>
+                <div>
+                  <strong>Bayar di Kasir (Open Tab)</strong>
+                  <p>Bayar setelah makan di meja / selesai</p>
+                </div>
+              </div>
+            </label>
+            <label class="payment-option-card">
+              <input type="radio" name="paymentMethod" value="qris">
+              <div class="payment-card-content">
+                <span class="pay-icon">📱</span>
+                <div>
+                  <strong>Bayar Sekarang via QRIS</strong>
+                  <p>Scan QR m-Banking / e-Wallet langsung di HP</p>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="order-summary-box">
+          <div class="summary-row">
+            <span>Subtotal</span>
+            <span id="summarySubtotal">Rp 0</span>
+          </div>
+          <div class="summary-row total-row">
+            <span>Total Bayar</span>
+            <span id="summaryTotal">Rp 0</span>
+          </div>
+          <p class="summary-notice" id="paymentNotice">Pembayaran dilakukan di kasir setelah pesanan diterima / selesai makan.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="primary-btn checkout-submit-btn" id="submitOrderBtn">
+          <span>Kirim Pesanan ke Kasir</span>
+          <span class="btn-icon">🚀</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL POPUP QRIS PEMBAYARAN MANDIRI -->
+  <div class="modal-overlay" id="qrisPaymentModal" style="display: none;">
+    <div class="modal-card" style="text-align: center;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">📱</span>
+          <h3>Bayar via QRIS Mandiri</h3>
+        </div>
+        <button class="modal-close-btn" id="closeQrisModalBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-subtitle">Scan QRIS ini menggunakan aplikasi BCA, GoPay, OVO, Dana, ShopeePay, atau m-Banking Anda:</p>
+        <div class="qris-box-wrap">
+          <div class="qris-badge-auto">Nominal Pas Otomatis</div>
+          <div class="qris-canvas-wrap" id="qrisCanvasWrap">
+            <!-- Canvas QR mandiri langsung dari browser tanpa pihak ketiga -->
+            <div id="qrisDirectCanvas" style="display: flex; justify-content: center; align-items: center; min-height: 220px;"></div>
+            <img id="qrisDynamicImage" src="" alt="QRIS Dinamis" style="width: 220px; height: 220px; display: none; margin: 0 auto;">
+            <div id="qrisLoading" class="spinner" style="width: 32px; height: 32px; margin: 40px auto; display: none;"></div>
+          </div>
+          <div class="qris-amount-display" id="qrisAmountDisplay">Rp 0</div>
+          <p class="qris-order-ref" id="qrisOrderRef">ID: #---</p>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 10px;">
+          Setelah transfer berhasil, kasir akan langsung memverifikasi dan pesanan Anda segera dimasak.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="primary-btn" id="confirmPaidBtn">
+          <span>Saya Sudah Bayar</span>
+          <span class="btn-icon">✅</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL PELACAK STATUS PESANAN (ORDER TRACKER) -->
+  <div class="modal-overlay" id="trackerModal" style="display: none;">
+    <div class="modal-card tracker-card" style="position: relative;">
+      <button class="modal-close-btn" id="closeTrackerXBtn" style="position: absolute; top: 16px; right: 16px; z-index: 10;">✕</button>
+      <div class="tracker-header">
+        <div class="tracker-success-icon">🎉</div>
+        <h3>Pesanan Terkirim!</h3>
+        <p class="order-id-label">ID Pesanan: <strong id="trackerOrderId">#---</strong></p>
+        <span class="tracker-table-pill" id="trackerTablePill">Meja --</span>
+      </div>
+
+      <!-- KARTU ESTIMASI WAKTU PENYIAPAN DAPUR -->
+      <div class="cooking-timer-card" id="cookingTimerCard">
+        <div class="timer-top-row">
+          <div class="timer-title-wrap">
+            <span class="timer-icon-animated" id="timerIcon">🍳</span>
+            <span class="timer-heading" id="timerHeading">Estimasi Waktu Dapur</span>
+          </div>
+          <span class="timer-duration-badge" id="timerDurationBadge">~12 - 15 Mnt</span>
+        </div>
+        <div class="timer-progress-track">
+          <div class="timer-progress-bar" id="timerProgressBar"></div>
+        </div>
+        <p class="timer-status-hint" id="timerStatusHint">
+          Menunggu konfirmasi kasir sebelum pesanan dimasak...
+        </p>
+      </div>
+
+      <!-- TIMELINE STATUS PESANAN -->
+      <div class="order-status-timeline">
+        <div class="timeline-step active" id="stepPending">
+          <div class="step-icon">⏳</div>
+          <div class="step-content">
+            <h4>Menunggu Konfirmasi</h4>
+            <p>Pesanan telah dikirim, kasir sedang meninjau pesanan Anda.</p>
+          </div>
+        </div>
+        <div class="timeline-step" id="stepProcessing">
+          <div class="step-icon">🍳</div>
+          <div class="step-content">
+            <h4>Diproses</h4>
+            <p>Pesanan Anda diterima kasir dan sedang dimasak di dapur.</p>
+          </div>
+        </div>
+        <div class="timeline-step" id="stepCompleted">
+          <div class="step-icon">✅</div>
+          <div class="step-content">
+            <h4>Disajikan / Selesai</h4>
+            <p>Hidangan telah siap! Selamat menikmati santapan Anda.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tracker-items-summary" id="trackerItemsSummary">
+        <!-- Rincian item pesanan -->
+      </div>
+
+      <div class="modal-footer tracker-footer">
+        <button class="btn-round-add" id="newOrderBtn">
+          <span>+ Pesan Menu Tambahan</span>
+          <span class="btn-icon">🍽️</span>
+        </button>
+        <button class="primary-btn" id="closeTrackerBtn">Tutup Pantauan</button>
+        <button class="btn-finish-table" id="finishAndClearTableBtn" style="display: none;">
+          <span>Selesai Santap / Mulai Meja Baru</span>
+          <span class="btn-icon">✨</span>
+        </button>
+      </div>
+    </div>
+  <!-- MODAL STRUK DIGITAL PEMBAYARAN LUNAS (PAYMENT SUCCESS MODAL) -->
+  <div class="modal-overlay" id="paymentSuccessModal" style="display: none;">
+    <div class="modal-card success-receipt-card" style="text-align: center; position: relative;">
+      <div class="success-receipt-header">
+        <div class="success-check-badge">
+          <span>✓</span>
+        </div>
+        <h3 class="success-title">Pembayaran Lunas!</h3>
+        <p class="success-subtitle">Terima kasih telah bersantap di <strong id="paidStoreName">Resto Digital</strong></p>
+        <span class="tracker-table-pill" id="paidTablePill">Meja --</span>
+      </div>
+
+      <div class="success-receipt-box">
+        <div class="srb-row">
+          <span class="srb-label">ID Pesanan:</span>
+          <strong class="srb-value" id="paidOrderId">#ORD-000000</strong>
+        </div>
+        <div class="srb-row">
+          <span class="srb-label">Metode Bayar:</span>
+          <span class="paid-method-badge" id="paidMethodBadge">Lunas di Kasir</span>
+        </div>
+        <div class="srb-row total-paid-row">
+          <span class="srb-label">Total Dibayar:</span>
+          <strong class="paid-amount-val" id="paidTotalAmount">Rp 0</strong>
+        </div>
+      </div>
+
+      <div class="paid-items-list-wrap" id="paidItemsListWrap">
+        <!-- Rincian menu terbayar -->
+      </div>
+
+      <div class="modal-footer success-receipt-footer">
+        <button class="primary-btn btn-finish-clean" id="finishSessionAfterPaidBtn">
+          <span>Selesai & Kosongkan Meja</span>
+          <span class="btn-icon">✨</span>
+        </button>
+        <button class="secondary-btn" id="closePaidReceiptBtn">
+          <span>Lihat Menu Kembali</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIREBASE SDK, QRCODE GENERATOR & APP SCRIPT -->
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="app.js?v=4.1"></script>
+</body>
+</html>
