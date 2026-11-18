@@ -58,7 +58,7 @@ class DatabaseHelper {
     final dbPath = customPath ?? join(await getDatabasesPath(), 'mini_resto.db');
     _database = await openDatabase(
       dbPath,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -76,6 +76,20 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE orders ADD COLUMN cookingStartedAt INTEGER');
       await db.execute("ALTER TABLE orders ADD COLUMN completedItemIdsJson TEXT NOT NULL DEFAULT '[]'");
       await db.execute('CREATE INDEX IF NOT EXISTS idx_orders_kitchenStatus ON orders(kitchenStatus)');
+    }
+    if (oldVersion < 3) {
+      // Migrasi v2 -> v3:
+      // Menambahkan kolom diskon transaksi, biaya layanan (service charge), dan pajak PB1
+      await db.execute('ALTER TABLE orders ADD COLUMN discountAmount INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE orders ADD COLUMN discountPercent REAL NOT NULL DEFAULT 0.0');
+      await db.execute('ALTER TABLE orders ADD COLUMN taxAmount INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE orders ADD COLUMN serviceChargeAmount INTEGER NOT NULL DEFAULT 0');
+
+      await db.execute('ALTER TABLE transactions ADD COLUMN subtotal INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE transactions ADD COLUMN discountAmount INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE transactions ADD COLUMN discountPercent REAL NOT NULL DEFAULT 0.0');
+      await db.execute('ALTER TABLE transactions ADD COLUMN taxAmount INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE transactions ADD COLUMN serviceChargeAmount INTEGER NOT NULL DEFAULT 0');
     }
   }
 
@@ -142,6 +156,10 @@ class DatabaseHelper {
         onlineOrderId TEXT,
         createdAt INTEGER NOT NULL,
         completedAt INTEGER,
+        discountAmount INTEGER NOT NULL DEFAULT 0,
+        discountPercent REAL NOT NULL DEFAULT 0.0,
+        taxAmount INTEGER NOT NULL DEFAULT 0,
+        serviceChargeAmount INTEGER NOT NULL DEFAULT 0,
         kitchenStatus TEXT NOT NULL DEFAULT 'pending',
         cookingStartedAt INTEGER,
         completedItemIdsJson TEXT NOT NULL DEFAULT '[]'
@@ -160,6 +178,11 @@ class DatabaseHelper {
         cashierId TEXT NOT NULL,
         cashierName TEXT NOT NULL,
         paymentMethod TEXT NOT NULL,
+        subtotal INTEGER NOT NULL DEFAULT 0,
+        discountAmount INTEGER NOT NULL DEFAULT 0,
+        discountPercent REAL NOT NULL DEFAULT 0.0,
+        taxAmount INTEGER NOT NULL DEFAULT 0,
+        serviceChargeAmount INTEGER NOT NULL DEFAULT 0,
         totalAmount INTEGER NOT NULL,
         amountPaid INTEGER NOT NULL,
         change INTEGER NOT NULL,
@@ -359,6 +382,10 @@ class DatabaseHelper {
         completedAt: e['completedAt'] != null
             ? DateTime.fromMillisecondsSinceEpoch(e['completedAt'] as int)
             : null,
+        discountAmount: (e['discountAmount'] as num?)?.toInt() ?? 0,
+        discountPercent: (e['discountPercent'] as num?)?.toDouble() ?? 0.0,
+        taxAmount: (e['taxAmount'] as num?)?.toInt() ?? 0,
+        serviceChargeAmount: (e['serviceChargeAmount'] as num?)?.toInt() ?? 0,
         kitchenStatus: e['kitchenStatus'] as String? ?? 'pending',
         cookingStartedAt: e['cookingStartedAt'] != null
             ? DateTime.fromMillisecondsSinceEpoch(e['cookingStartedAt'] as int)
@@ -394,6 +421,10 @@ class DatabaseHelper {
             'onlineOrderId': o.onlineOrderId,
             'createdAt': o.createdAt.millisecondsSinceEpoch,
             'completedAt': o.completedAt?.millisecondsSinceEpoch,
+            'discountAmount': o.discountAmount,
+            'discountPercent': o.discountPercent,
+            'taxAmount': o.taxAmount,
+            'serviceChargeAmount': o.serviceChargeAmount,
             'kitchenStatus': o.kitchenStatus,
             'cookingStartedAt': o.cookingStartedAt?.millisecondsSinceEpoch,
             'completedItemIdsJson': jsonEncode(o.completedItemIds),
@@ -432,6 +463,10 @@ class DatabaseHelper {
         'onlineOrderId': order.onlineOrderId,
         'createdAt': order.createdAt.millisecondsSinceEpoch,
         'completedAt': order.completedAt?.millisecondsSinceEpoch,
+        'discountAmount': order.discountAmount,
+        'discountPercent': order.discountPercent,
+        'taxAmount': order.taxAmount,
+        'serviceChargeAmount': order.serviceChargeAmount,
         'kitchenStatus': order.kitchenStatus,
         'cookingStartedAt': order.cookingStartedAt?.millisecondsSinceEpoch,
         'completedItemIdsJson': jsonEncode(order.completedItemIds),

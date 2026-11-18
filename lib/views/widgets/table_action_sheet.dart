@@ -4,6 +4,7 @@ import '../../models/restaurant_table.dart';
 import '../../models/order_model.dart';
 import '../../models/online_order_model.dart';
 import '../../theme/app_theme.dart';
+import 'split_bill_dialog.dart';
 
 /// Modal Bottom Sheet / Dialog Aksi Meja (Multi-Resolusi & Ergonomis)
 /// Menyajikan interaksi satu sentuhan untuk meja kosong, meja terisi, atau pesanan web masuk.
@@ -787,6 +788,24 @@ class TableActionSheet extends StatelessWidget {
             ),
           ),
         ),
+
+        // Opsi Pisah Tagihan (Split Bill) jika pesanan memiliki lebih dari 1 item / porsi
+        if (order.items.length > 1 || (order.items.isNotEmpty && order.items.any((i) => i.qty > 1))) ...[
+          const SizedBox(height: 4),
+          Center(
+            child: TextButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                SplitBillDialog.show(context: context, order: order);
+              },
+              icon: const Icon(Icons.call_split_rounded, size: 16, color: Color(0xFF6366F1)),
+              label: const Text(
+                'Pisah Tagihan (Split Bill)',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF6366F1)),
+              ),
+            ),
+          ),
+        ],
 
         // Opsi Pindah Meja (jika ada meja kosong)
         if (onMoveTable != null && availableTablesForMove.isNotEmpty) ...[

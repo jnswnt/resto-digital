@@ -4,11 +4,13 @@ import '../models/category_model.dart';
 import '../models/product_model.dart';
 import '../models/order_model.dart';
 import '../models/transaction_model.dart';
+import '../models/settings_model.dart';
 import '../services/storage_service.dart';
 
 /// Provider Transaksi POS Resto.
 /// Mengelola keranjang belanja, filter kategori, pencarian menu,
-/// transaksi langsung (Pay First), dan pesanan gantung/meja (Open Tab).
+/// diskon/voucher, pajak PB1, service charge,
+/// transaksi langsung (Pay First), pesanan gantung/meja (Open Tab), dan Split Bill.
 class PosProvider with ChangeNotifier {
   final StorageService _storageService;
   final _uuid = const Uuid();
@@ -24,6 +26,10 @@ class PosProvider with ChangeNotifier {
   String _customerName = 'Pelanggan';
   OrderModel? _activeEditingTab;
 
+  // State Diskon Transaksi Keranjang Kasir
+  int _cartDiscountAmount = 0;
+  double _cartDiscountPercent = 0.0;
+
   PosProvider(this._storageService) {
     loadData();
   }
@@ -37,9 +43,66 @@ class PosProvider with ChangeNotifier {
   String get customerName => _customerName;
   OrderModel? get activeEditingTab => _activeEditingTab;
 
+  int get cartDiscountAmount => _cartDiscountAmount;
+  double get cartDiscountPercent => _cartDiscountPercent;
+
   int get cartSubtotal => _cartItems.fold(0, (sum, item) => sum + item.total);
   int get cartTotalItems => _cartItems.fold(0, (sum, item) => sum + item.qty);
   bool get isCartEmpty => _cartItems.isEmpty;
+
+  /// Nilai subtotal keranjang setelah dipotong diskon
+  int get cartSubtotalAfterDiscount =>
+      (cartSubtotal - _cartDiscountAmount).clamp(0, 999999999);
+
+  /// Mengatur diskon keranjang kasir dalam persentase (%)
+  void setDiscountPercent(double percent) {
+    _cartDiscountPercent = percent.clamp(0.0, 100.0);
+    _cartDiscountAmount = ((cartSubtotal * _cartDiscountPercent) / 100).round();
+    notifyListeners();
+  }
+
+  /// Mengatur diskon keranjang kasir dalam nominal rupiah (Rp)
+  void setDiscountAmount(int amount) {
+    _cartDiscountAmount = amount.clamp(0, cartSubtotal);
+    _cartDiscountPercent = cartSubtotal > 0
+        ? ((_cartDiscountAmount / cartSubtotal) * 100)
+        : 0.0;
+    notifyListeners();
+  }
+
+  /// Menghapus diskon yang sedang aktif pada keranjang kasir
+  void clearDiscount() {
+    _cartDiscountAmount = 0;
+    _cartDiscountPercent = 0.0;
+    notifyListeners();
+  }
+
+  /// Menghitung Biaya Layanan (Service Charge) berdasarkan SettingsModel
+  int calculateServiceCharge(SettingsModel settings, [int? customBaseSubtotal]) {
+    if (!settings.enableServiceCharge) return 0;
+    final base = customBaseSubtotal ?? cartSubtotalAfterDiscount;
+    return ((base * settings.serviceChargePercentage) / 100).round();
+  }
+
+  /// Menghitung Pajak Restoran (PB1) berdasarkan SettingsModel
+  int calculateTax(
+    SettingsModel settings, [
+    int? customBaseSubtotal,
+    int? customServiceCharge,
+  ]) {
+    if (!settings.enableTax) return 0;
+    final base = customBaseSubtotal ?? cartSubtotalAfterDiscount;
+    final svc = customServiceCharge ?? calculateServiceCharge(settings, base);
+    return (((base + svc) * settings.taxPercentage) / 100).round();
+  }
+
+  /// Menghitung Total Akhir Tagihan Keranjang (Subtotal - Diskon + Service Charge + PB1)
+  int calculateCartGrandTotal(SettingsModel settings) {
+    final subAfterDisc = cartSubtotalAfterDiscount;
+    final svc = calculateServiceCharge(settings, subAfterDisc);
+    final tax = calculateTax(settings, subAfterDisc, svc);
+    return (subAfterDisc + svc + tax).clamp(0, 999999999);
+  }
 
   /// Memuat produk dan kategori dari penyimpanan lokal
   void loadData() {
@@ -204,20 +267,32 @@ class PosProvider with ChangeNotifier {
     }
   }
 
-  /// Mengosongkan keranjang belanja
+  /// Mengosongkan keranjang belanja kasir dan mereset diskon
   void clearCart() {
     _cartItems.clear();
     _selectedTableNo = null;
     _customerName = 'Pelanggan';
     _activeEditingTab = null;
+    _cartDiscountAmount = 0;
+    _cartDiscountPercent = 0.0;
     notifyListeners();
   }
 
   /// Menyimpan keranjang sebagai Pesanan Gantung / Meja (Open Tab)
   /// Dilengkapi perlindungan anti-duplikasi meja, sinkronisasi KDS ronde baru,
-  /// dan deduksi stok dini untuk mencegah overselling.
-  Future<OrderModel> saveAsOpenTab({required String shiftId}) async {
+  /// pencatatan diskon/pajak, dan deduksi stok dini untuk mencegah overselling.
+  Future<OrderModel> saveAsOpenTab({
+    required String shiftId,
+    int? discountAmount,
+    double? discountPercent,
+    int? taxAmount,
+    int? serviceChargeAmount,
+  }) async {
     final orders = _storageService.getOrders();
+    final disc = discountAmount ?? _cartDiscountAmount;
+    final discPct = discountPercent ?? _cartDiscountPercent;
+    final tax = taxAmount ?? 0;
+    final svc = serviceChargeAmount ?? 0;
 
     OrderModel orderToSave;
     if (_activeEditingTab != null) {
@@ -228,6 +303,10 @@ class PosProvider with ChangeNotifier {
         customerName: _customerName,
         items: List.from(_cartItems),
         status: 'open',
+        discountAmount: disc,
+        discountPercent: discPct,
+        taxAmount: tax,
+        serviceChargeAmount: svc,
         kitchenStatus: 'pending',
         cookingStartedAt: null,
         completedItemIds: const [],
@@ -288,6 +367,10 @@ class PosProvider with ChangeNotifier {
         customerName: _customerName,
         items: List.from(_cartItems),
         status: 'open',
+        discountAmount: disc,
+        discountPercent: discPct,
+        taxAmount: tax,
+        serviceChargeAmount: svc,
         kitchenStatus: 'pending',
         createdAt: DateTime.now(),
       );
@@ -529,6 +612,8 @@ class PosProvider with ChangeNotifier {
     _activeEditingTab = order;
     _selectedTableNo = order.tableNo;
     _customerName = order.customerName;
+    _cartDiscountAmount = order.discountAmount;
+    _cartDiscountPercent = order.discountPercent;
     _cartItems.clear();
     for (final item in order.items) {
       _cartItems.add(
@@ -564,7 +649,8 @@ class PosProvider with ChangeNotifier {
   }
 
   /// Menyelesaikan pembayaran transaksi dari keranjang POS kasir
-  /// Mencegah distorsi pembayaran jika terdapat DP QRIS awal & pelunasan kasir.
+  /// Mendukung pencatatan diskon transaksi, biaya layanan (service charge), pajak PB1,
+  /// dan mencegah distorsi pembayaran jika terdapat DP QRIS awal & pelunasan kasir.
   Future<TransactionModel> completeCheckout({
     required String shiftId,
     required String cashierId,
@@ -574,10 +660,19 @@ class PosProvider with ChangeNotifier {
     required int change,
     String? customerId,
     String? customerName,
+    int? discountAmount,
+    double? discountPercent,
+    int? taxAmount,
+    int? serviceChargeAmount,
   }) async {
     final orderId = _activeEditingTab?.id ?? 'ord_${_uuid.v4().substring(0, 8)}';
     final orders = _storageService.getOrders();
-    final totalBill = cartSubtotal;
+    final sub = cartSubtotal;
+    final disc = discountAmount ?? _cartDiscountAmount;
+    final discPct = discountPercent ?? _cartDiscountPercent;
+    final svc = serviceChargeAmount ?? 0;
+    final tax = taxAmount ?? 0;
+    final totalBill = (sub - disc + svc + tax).clamp(0, 999999999);
     final initialPaid = _activeEditingTab?.paidAmount ?? 0;
 
     // 1. Simpan atau perbarui status order menjadi completed
@@ -588,6 +683,10 @@ class PosProvider with ChangeNotifier {
       customerName: customerName ?? _customerName,
       items: List.from(_cartItems),
       status: 'completed',
+      discountAmount: disc,
+      discountPercent: discPct,
+      taxAmount: tax,
+      serviceChargeAmount: svc,
       paidAmount: totalBill,
       onlineOrderId: _activeEditingTab?.onlineOrderId,
       createdAt: _activeEditingTab?.createdAt ?? DateTime.now(),
@@ -618,6 +717,7 @@ class PosProvider with ChangeNotifier {
         cashierId: cashierId,
         cashierName: 'Self-Order (QRIS)',
         paymentMethod: 'qris',
+        subtotal: initialPaid,
         totalAmount: initialPaid,
         amountPaid: initialPaid,
         change: 0,
@@ -635,6 +735,11 @@ class PosProvider with ChangeNotifier {
         cashierId: cashierId,
         cashierName: cashierName,
         paymentMethod: paymentMethod,
+        subtotal: sub,
+        discountAmount: disc,
+        discountPercent: discPct,
+        taxAmount: tax,
+        serviceChargeAmount: svc,
         totalAmount: settlementAmount,
         amountPaid: amountPaid,
         change: change,
@@ -652,6 +757,11 @@ class PosProvider with ChangeNotifier {
         cashierId: cashierId,
         cashierName: cashierName,
         paymentMethod: paymentMethod,
+        subtotal: sub,
+        discountAmount: disc,
+        discountPercent: discPct,
+        taxAmount: tax,
+        serviceChargeAmount: svc,
         totalAmount: totalBill,
         amountPaid: amountPaid,
         change: change,
@@ -686,16 +796,29 @@ class PosProvider with ChangeNotifier {
     required int change,
     String? customerId,
     String? customerName,
+    int? discountAmount,
+    double? discountPercent,
+    int? taxAmount,
+    int? serviceChargeAmount,
   }) async {
     final orders = _storageService.getOrders();
     final orderIndex = orders.indexWhere((o) => o.id == order.id);
-    final totalBill = order.total;
+    final disc = discountAmount ?? order.discountAmount;
+    final discPct = discountPercent ?? order.discountPercent;
+    final svc = serviceChargeAmount ?? order.serviceChargeAmount;
+    final tax = taxAmount ?? order.taxAmount;
+    final sub = order.subtotal;
+    final totalBill = (sub - disc + svc + tax).clamp(0, 999999999);
     final initialPaid = order.paidAmount;
 
     // 1. Simpan pesanan selesai
     final completedOrder = order.copyWith(
       customerName: customerName ?? order.customerName,
       status: 'completed',
+      discountAmount: disc,
+      discountPercent: discPct,
+      taxAmount: tax,
+      serviceChargeAmount: svc,
       paidAmount: totalBill,
       completedAt: DateTime.now(),
     );
@@ -720,6 +843,7 @@ class PosProvider with ChangeNotifier {
         cashierId: cashierId,
         cashierName: 'Self-Order (QRIS)',
         paymentMethod: 'qris',
+        subtotal: initialPaid,
         totalAmount: initialPaid,
         amountPaid: initialPaid,
         change: 0,
@@ -737,6 +861,11 @@ class PosProvider with ChangeNotifier {
         cashierId: cashierId,
         cashierName: cashierName,
         paymentMethod: paymentMethod,
+        subtotal: sub,
+        discountAmount: disc,
+        discountPercent: discPct,
+        taxAmount: tax,
+        serviceChargeAmount: svc,
         totalAmount: settlementAmount,
         amountPaid: amountPaid,
         change: change,
@@ -753,6 +882,11 @@ class PosProvider with ChangeNotifier {
         cashierId: cashierId,
         cashierName: cashierName,
         paymentMethod: paymentMethod,
+        subtotal: sub,
+        discountAmount: disc,
+        discountPercent: discPct,
+        taxAmount: tax,
+        serviceChargeAmount: svc,
         totalAmount: totalBill,
         amountPaid: amountPaid,
         change: change,
@@ -773,6 +907,162 @@ class PosProvider with ChangeNotifier {
     }
 
     return primaryTrx;
+  }
+
+  /// Memisahkan item terpilih dari pesanan meja (Split Bill) menjadi meja / Open Tab baru.
+  /// Mengurangi kuantitas item dari meja asal atau menghapusnya jika seluruh kuantitas dipindahkan.
+  Future<OrderModel?> splitOrderToNewTab({
+    required String sourceOrderId,
+    required List<OrderItem> itemsToSplit,
+    required String newTableNo,
+    String? newCustomerName,
+    required String shiftId,
+  }) async {
+    final orders = _storageService.getOrders();
+    final index = orders.indexWhere((o) => o.id == sourceOrderId);
+    if (index < 0) return null;
+
+    final sourceOrder = orders[index];
+    final remainingItems = <OrderItem>[];
+
+    // Kurangi kuantitas item dari meja asal
+    for (final srcItem in sourceOrder.items) {
+      final splitMatch = itemsToSplit.where(
+        (i) => i.productId == srcItem.productId && i.notes == srcItem.notes,
+      );
+      final splitQty = splitMatch.fold<int>(0, (sum, i) => sum + i.qty);
+      final remQty = srcItem.qty - splitQty;
+      if (remQty > 0) {
+        remainingItems.add(srcItem.copyWith(qty: remQty));
+      }
+    }
+
+    // Update pesanan asal
+    final updatedSourceOrder = sourceOrder.copyWith(
+      items: remainingItems,
+      status: remainingItems.isEmpty ? 'completed' : sourceOrder.status,
+      completedAt: remainingItems.isEmpty ? DateTime.now() : sourceOrder.completedAt,
+    );
+    orders[index] = updatedSourceOrder;
+
+    // Buat pesanan baru untuk item yang dipisah
+    final newOrder = OrderModel(
+      id: 'ord_${_uuid.v4().substring(0, 8)}',
+      shiftId: shiftId,
+      tableNo: newTableNo,
+      customerName: newCustomerName ?? '${sourceOrder.customerName} (Bill B)',
+      items: List.from(itemsToSplit),
+      status: 'open',
+      kitchenStatus: sourceOrder.kitchenStatus,
+      createdAt: DateTime.now(),
+    );
+    orders.add(newOrder);
+
+    await _storageService.saveOrders(orders);
+    notifyListeners();
+    return newOrder;
+  }
+
+  /// Memisahkan item terpilih dari pesanan meja (Split Bill) dan langsung menyelesaikan pembayarannya di kasir.
+  /// Item yang dibayar dipotong dari meja asal. Jika semua item lunas, meja asal otomatis berstatus completed.
+  Future<TransactionModel> splitOrderAndCheckoutDirectly({
+    required String sourceOrderId,
+    required List<OrderItem> itemsToPay,
+    required String shiftId,
+    required String cashierId,
+    required String cashierName,
+    required String paymentMethod,
+    required int amountPaid,
+    required int change,
+    int? discountAmount,
+    double? discountPercent,
+    int? taxAmount,
+    int? serviceChargeAmount,
+    String? customerId,
+    String? customerName,
+  }) async {
+    final orders = _storageService.getOrders();
+    final index = orders.indexWhere((o) => o.id == sourceOrderId);
+    if (index < 0) {
+      throw Exception('Pesanan asal dengan ID $sourceOrderId tidak ditemukan.');
+    }
+
+    final sourceOrder = orders[index];
+    final remainingItems = <OrderItem>[];
+
+    for (final srcItem in sourceOrder.items) {
+      final splitMatch = itemsToPay.where(
+        (i) => i.productId == srcItem.productId && i.notes == srcItem.notes,
+      );
+      final splitQty = splitMatch.fold<int>(0, (sum, i) => sum + i.qty);
+      final remQty = srcItem.qty - splitQty;
+      if (remQty > 0) {
+        remainingItems.add(srcItem.copyWith(qty: remQty));
+      }
+    }
+
+    // Hitung total bayar untuk item yang di-split
+    final sub = itemsToPay.fold<int>(0, (sum, i) => sum + i.total);
+    final disc = discountAmount ?? 0;
+    final discPct = discountPercent ?? 0.0;
+    final svc = serviceChargeAmount ?? 0;
+    final tax = taxAmount ?? 0;
+    final totalBill = (sub - disc + svc + tax).clamp(0, 999999999);
+
+    final splitCompletedOrderId = 'ord_${_uuid.v4().substring(0, 8)}';
+    final splitCompletedOrder = OrderModel(
+      id: splitCompletedOrderId,
+      shiftId: shiftId,
+      tableNo: sourceOrder.tableNo,
+      customerName: customerName ?? '${sourceOrder.customerName} (Split)',
+      items: List.from(itemsToPay),
+      status: 'completed',
+      discountAmount: disc,
+      discountPercent: discPct,
+      taxAmount: tax,
+      serviceChargeAmount: svc,
+      paidAmount: totalBill,
+      createdAt: DateTime.now(),
+      completedAt: DateTime.now(),
+      kitchenStatus: sourceOrder.kitchenStatus,
+    );
+    orders.add(splitCompletedOrder);
+
+    // Perbarui pesanan asal: jika sisa item habis, tandai completed
+    final updatedSource = sourceOrder.copyWith(
+      items: remainingItems,
+      status: remainingItems.isEmpty ? 'completed' : sourceOrder.status,
+      completedAt: remainingItems.isEmpty ? DateTime.now() : sourceOrder.completedAt,
+    );
+    orders[index] = updatedSource;
+    await _storageService.saveOrders(orders);
+
+    // Rekam transaksi pembayaran
+    final transactions = _storageService.getTransactions();
+    final splitTrx = TransactionModel(
+      id: 'trx_${_uuid.v4().substring(0, 8)}',
+      orderId: splitCompletedOrderId,
+      shiftId: shiftId,
+      cashierId: cashierId,
+      cashierName: cashierName,
+      paymentMethod: paymentMethod,
+      subtotal: sub,
+      discountAmount: disc,
+      discountPercent: discPct,
+      taxAmount: tax,
+      serviceChargeAmount: svc,
+      totalAmount: totalBill,
+      amountPaid: amountPaid,
+      change: change,
+      customerId: customerId,
+      customerName: customerName ?? '${sourceOrder.customerName} (Split)',
+      timestamp: DateTime.now(),
+    );
+    transactions.add(splitTrx);
+    await _storageService.saveTransactions(transactions);
+
+    notifyListeners();
+    return splitTrx;
   }
 
   /// Mencatat transaksi pelunasan kasbon pelanggan ke dalam log transaksi dan arsip pesanan

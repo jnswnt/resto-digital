@@ -123,7 +123,22 @@ class PrinterReceiptService {
     buffer.writeln(dividerLine(width, '-'));
 
     // 5. Total dan Pembayaran
-    buffer.writeln(twoColumnText('Total Belanja ($totalQty):', _currencyFormat.format(order.total), width));
+    buffer.writeln(twoColumnText('Subtotal ($totalQty item):', _currencyFormat.format(order.subtotal), width));
+    if (order.discountAmount > 0) {
+      final discLabel = order.discountPercent > 0
+          ? 'Diskon (${order.discountPercent.toStringAsFixed(0)}%):'
+          : 'Diskon Transaksi:';
+      buffer.writeln(twoColumnText(discLabel, '-${_currencyFormat.format(order.discountAmount)}', width));
+    }
+    if (order.serviceChargeAmount > 0) {
+      buffer.writeln(twoColumnText('Biaya Layanan:', _currencyFormat.format(order.serviceChargeAmount), width));
+    }
+    if (order.taxAmount > 0) {
+      final taxLabel = 'Pajak Resto (${settings.taxPercentage.toStringAsFixed(0)}%):';
+      buffer.writeln(twoColumnText(taxLabel, _currencyFormat.format(order.taxAmount), width));
+    }
+    buffer.writeln(dividerLine(width, '-'));
+    buffer.writeln(twoColumnText('TOTAL AKHIR:', _currencyFormat.format(order.total), width));
     if (order.paidAmount > 0 && order.paidAmount < order.total) {
       buffer.writeln(twoColumnText('Uang Muka (QRIS):', '-${_currencyFormat.format(order.paidAmount)}', width));
       buffer.writeln(twoColumnText('Sisa Tagihan:', _currencyFormat.format(order.total - order.paidAmount), width));
@@ -246,7 +261,26 @@ class PrinterReceiptService {
   $itemsHtml
 
   <div class="divider-single"></div>
-  <div class="row"><span>Total Item ($totalQty):</span><span>${_currencyFormat.format(order.total)}</span></div>
+  <div class="row"><span>Subtotal ($totalQty item):</span><span>${_currencyFormat.format(order.subtotal)}</span></div>
+  ${order.discountAmount > 0 ? '''
+  <div class="row" style="color: #dc2626;">
+    <span>Diskon ${order.discountPercent > 0 ? '(${order.discountPercent.toStringAsFixed(0)}%)' : ''}:</span>
+    <span>-${_currencyFormat.format(order.discountAmount)}</span>
+  </div>
+  ''' : ''}
+  ${order.serviceChargeAmount > 0 ? '''
+  <div class="row">
+    <span>Biaya Layanan:</span>
+    <span>${_currencyFormat.format(order.serviceChargeAmount)}</span>
+  </div>
+  ''' : ''}
+  ${order.taxAmount > 0 ? '''
+  <div class="row">
+    <span>Pajak Resto (${settings.taxPercentage.toStringAsFixed(0)}%):</span>
+    <span>${_currencyFormat.format(order.taxAmount)}</span>
+  </div>
+  ''' : ''}
+  <div class="divider-single"></div>
   <div class="row bold" style="font-size: 110%;">
     <span>TOTAL TAGIHAN:</span>
     <span>${_currencyFormat.format(order.total)}</span>

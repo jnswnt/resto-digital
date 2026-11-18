@@ -11,6 +11,8 @@ import 'qris_config_screen.dart';
 import 'table_qr_generator_screen.dart';
 import 'printer_settings_screen.dart';
 import 'cloud_config_screen.dart';
+import 'tax_service_config_screen.dart';
+import 'backup_restore_screen.dart';
 import '../widgets/owner_profile_dialog.dart';
 
 /// Layar Pengaturan Utama (List Sub Menu - Bebas Tab)
@@ -253,6 +255,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               _buildMenuCard(
                 context: context,
+                icon: Icons.receipt_long_rounded,
+                iconBg: const Color(0xFFE11D48),
+                title: 'Pajak PB1 & Service Charge',
+                subtitle: 'Atur saklar pajak makan resto (PB1 10%) dan biaya layanan (service charge) pada struk kasir.',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const TaxServiceConfigScreen()),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+
+              _buildMenuCard(
+                context: context,
                 icon: Icons.cloud_sync_rounded,
                 iconBg: const Color(0xFF0284C7),
                 title: 'Integrasi Cloud & Multi-Tenant',
@@ -295,6 +312,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'Profil & PIN Pemilik (Owner)',
                 subtitle: 'Ubah nama pemilik resto (${settingsProvider.ownerUser?.name ?? auth.currentUser?.name ?? "Owner"}) dan PIN rahasia master owner.',
                 onTap: () => OwnerProfileDialog.show(context),
+              ),
+              const SizedBox(height: 10),
+
+              _buildMenuCard(
+                context: context,
+                icon: Icons.backup_rounded,
+                iconBg: const Color(0xFF0D9488),
+                title: 'Backup & Pemulihan Data',
+                subtitle: 'Ekspor database offline ke file JSON aman atau impor file cadangan untuk memulihkan seluruh data resto.',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const BackupRestoreScreen()),
+                  );
+                },
               ),
 
               const SizedBox(height: 28),

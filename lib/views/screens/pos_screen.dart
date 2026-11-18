@@ -16,6 +16,7 @@ import '../../services/whatsapp_service.dart';
 import '../../services/printer_receipt_service.dart';
 import '../widgets/custom_notes_dialog.dart';
 import '../widgets/payment_dialog.dart';
+import '../widgets/discount_dialog.dart';
 import '../widgets/whatsapp_receipt_dialog.dart';
 import '../widgets/product_form_dialog.dart';
 import '../widgets/product_image_view.dart';
@@ -1223,6 +1224,112 @@ class _PosScreenState extends State<PosScreen> {
                             ),
                           ],
                         ),
+
+                        // Baris Diskon / Voucher Transaksi
+                        const SizedBox(height: 3),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            InkWell(
+                              onTap: () {
+                                DiscountDialog.show(
+                                  context: context,
+                                  subtotal: pos.cartSubtotal,
+                                  currentDiscountAmount: pos.cartDiscountAmount,
+                                  currentDiscountPercent: pos.cartDiscountPercent,
+                                  onApplyDiscount: ({required discountAmount, required discountPercent}) {
+                                    if (discountPercent > 0) {
+                                      pos.setDiscountPercent(discountPercent);
+                                    } else {
+                                      pos.setDiscountAmount(discountAmount);
+                                    }
+                                  },
+                                  onClearDiscount: () => pos.clearDiscount(),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(6),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.local_offer_outlined,
+                                    size: 13,
+                                    color: pos.cartDiscountAmount > 0 ? Colors.redAccent : AppTheme.primaryAmber,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    pos.cartDiscountAmount > 0
+                                        ? 'Diskon (${pos.cartDiscountPercent.toStringAsFixed(0)}%):'
+                                        : '+ Diskon/Promo',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: pos.cartDiscountAmount > 0 ? Colors.redAccent : AppTheme.primaryAmber,
+                                      decoration: pos.cartDiscountAmount == 0 ? TextDecoration.underline : TextDecoration.none,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (pos.cartDiscountAmount > 0)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '- ${_currencyFormat.format(pos.cartDiscountAmount)}',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  InkWell(
+                                    onTap: () => pos.clearDiscount(),
+                                    child: const Icon(Icons.close_rounded, size: 14, color: Colors.redAccent),
+                                  ),
+                                ],
+                              )
+                            else
+                              Text(
+                                'Rp 0',
+                                style: TextStyle(fontSize: 11, color: textMuted),
+                              ),
+                          ],
+                        ),
+
+                        // Baris Service Charge jika diaktifkan
+                        if (settings.enableServiceCharge) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Biaya Layanan (${settings.serviceChargePercentage.toStringAsFixed(0)}%):',
+                                style: TextStyle(fontSize: 11, color: textMuted),
+                              ),
+                              Text(
+                                _currencyFormat.format(pos.calculateServiceCharge(settings)),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor),
+                              ),
+                            ],
+                          ),
+                        ],
+
+                        // Baris Pajak Resto PB1 jika diaktifkan
+                        if (settings.enableTax) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Pajak Resto PB1 (${settings.taxPercentage.toStringAsFixed(0)}%):',
+                                style: TextStyle(fontSize: 11, color: textMuted),
+                              ),
+                              Text(
+                                _currencyFormat.format(pos.calculateTax(settings)),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor),
+                              ),
+                            ],
+                          ),
+                        ],
+
                         if (pos.activeEditingTab != null && (pos.activeEditingTab!.paidAmount > 0)) ...[
                           const SizedBox(height: 3),
                           Row(
@@ -1252,18 +1359,21 @@ class _PosScreenState extends State<PosScreen> {
                                 color: textColor,
                               ),
                             ),
-                            Text(
-                              _currencyFormat.format(
-                                pos.activeEditingTab != null && pos.activeEditingTab!.paidAmount > 0
-                                    ? (pos.cartSubtotal - pos.activeEditingTab!.paidAmount).clamp(0, 999999999)
-                                    : pos.cartSubtotal,
-                              ),
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                color: AppTheme.primaryAmber,
-                                letterSpacing: -0.5,
-                              ),
+                            Builder(
+                              builder: (context) {
+                                final grandTotal = pos.calculateCartGrandTotal(settings);
+                                final initPaid = pos.activeEditingTab?.paidAmount ?? 0;
+                                final payable = (grandTotal - initPaid).clamp(0, 999999999);
+                                return Text(
+                                  _currencyFormat.format(initPaid > 0 ? payable : grandTotal),
+                                  style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppTheme.primaryAmber,
+                                    letterSpacing: -0.5,
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),
@@ -1326,9 +1436,10 @@ class _PosScreenState extends State<PosScreen> {
                 flex: 2,
                 child: Builder(
                   builder: (ctx) {
+                    final grandTotal = pos.calculateCartGrandTotal(settings);
                     final initialPaid = pos.activeEditingTab?.paidAmount ?? 0;
-                    final isFullyPaid = pos.activeEditingTab != null && initialPaid >= pos.cartSubtotal && pos.cartSubtotal > 0;
-                    final remaining = (pos.cartSubtotal - initialPaid).clamp(0, 999999999);
+                    final isFullyPaid = pos.activeEditingTab != null && initialPaid >= grandTotal && grandTotal > 0;
+                    final remaining = (grandTotal - initialPaid).clamp(0, 999999999);
 
                     if (isFullyPaid) {
                       return ElevatedButton.icon(
@@ -2309,13 +2420,16 @@ class _PosScreenState extends State<PosScreen> {
     final auth = context.read<AuthProvider>();
     final debtProvider = context.read<CustomerDebtProvider>();
 
+    final serviceCharge = pos.calculateServiceCharge(settings);
+    final taxAmount = pos.calculateTax(settings, null, serviceCharge);
+    final grandTotal = pos.calculateCartGrandTotal(settings);
     final initialPaid = pos.activeEditingTab?.paidAmount ?? 0;
-    final payableAmount = (pos.cartSubtotal - initialPaid).clamp(0, 999999999);
+    final payableAmount = (grandTotal - initialPaid).clamp(0, 999999999);
 
     showDialog(
       context: context,
       builder: (ctx) => PaymentDialog(
-        totalAmount: initialPaid > 0 ? payableAmount : pos.cartSubtotal,
+        totalAmount: initialPaid > 0 ? payableAmount : grandTotal,
         initialCustomerName: pos.customerName,
         onPaymentCompleted: ({
           required String paymentMethod,
@@ -2333,7 +2447,11 @@ class _PosScreenState extends State<PosScreen> {
             tableNo: pos.selectedTableNo,
             customerName: customerName ?? pos.customerName,
             items: List.from(pos.cartItems),
-            paidAmount: pos.cartSubtotal,
+            discountAmount: pos.cartDiscountAmount,
+            discountPercent: pos.cartDiscountPercent,
+            serviceChargeAmount: serviceCharge,
+            taxAmount: taxAmount,
+            paidAmount: grandTotal,
             onlineOrderId: onlineIdToNotify,
           );
 
@@ -2345,6 +2463,10 @@ class _PosScreenState extends State<PosScreen> {
             paymentMethod: paymentMethod,
             amountPaid: amountPaid,
             change: change,
+            discountAmount: pos.cartDiscountAmount,
+            discountPercent: pos.cartDiscountPercent,
+            serviceChargeAmount: serviceCharge,
+            taxAmount: taxAmount,
             customerId: customerId,
             customerName: customerName,
           );

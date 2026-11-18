@@ -268,6 +268,13 @@ class _AppSidebarState extends State<AppSidebar> {
                   isDark: isDark,
                 ),
                 const SizedBox(height: 4),
+                // Menu Navigasi Masa Depan: Resep & Bahan Baku (Coming Soon)
+                _buildDisabledComingSoonNavItem(
+                  icon: Icons.receipt_long_outlined,
+                  label: 'Bahan Baku & Resep',
+                  isDark: isDark,
+                ),
+                const SizedBox(height: 4),
                 _buildNavItem(
                   index: 5,
                   icon: Icons.account_balance_wallet_outlined,
@@ -462,6 +469,97 @@ class _AppSidebarState extends State<AppSidebar> {
                 ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Menu Navigasi Disabled dengan Badge "SOON" yang tidak dapat diklik ke halaman lain
+  Widget _buildDisabledComingSoonNavItem({
+    required IconData icon,
+    required String label,
+    required bool isDark,
+  }) {
+    final inactiveText = (isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary).withValues(alpha: 0.6);
+
+    return InkWell(
+      onTap: () {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded, color: AppTheme.primaryAmber, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Fitur $label akan segera hadir pada pembaruan mendatang! (Coming Soon)'),
+                ),
+              ],
+            ),
+            duration: const Duration(seconds: 2),
+            backgroundColor: isDark ? const Color(0xFF242735) : const Color(0xFF1E293B),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Tooltip(
+        message: '$label (Coming Soon)',
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: isCollapsed ? 0 : 12,
+            vertical: 9,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisAlignment: isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: inactiveText,
+              ),
+              if (!isCollapsed) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: inactiveText,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryAmber.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppTheme.primaryAmber.withValues(alpha: 0.35),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: const Text(
+                    'SOON',
+                    style: TextStyle(
+                      color: AppTheme.primaryAmber,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );

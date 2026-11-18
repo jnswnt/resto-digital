@@ -64,6 +64,23 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Memperbarui konfigurasi Pajak Restoran (PB1) dan Biaya Layanan (Service Charge)
+  Future<void> updateTaxAndServiceSettings({
+    required bool enableTax,
+    required double taxPercentage,
+    required bool enableServiceCharge,
+    required double serviceChargePercentage,
+  }) async {
+    _settings = _settings.copyWith(
+      enableTax: enableTax,
+      taxPercentage: taxPercentage,
+      enableServiceCharge: enableServiceCharge,
+      serviceChargePercentage: serviceChargePercentage,
+    );
+    await _storageService.saveSettings(_settings);
+    notifyListeners();
+  }
+
   /// Memperbarui konfigurasi printer thermal dan format struk belanja
   Future<void> updatePrinterReceiptSettings({
     required String printerType,

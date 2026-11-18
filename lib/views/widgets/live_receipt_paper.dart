@@ -380,6 +380,56 @@ class LiveReceiptPaper extends StatelessWidget {
                       ],
                     ),
 
+                    // Diskon Transaksi jika ada
+                    if (order.discountAmount > 0) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            order.discountPercent > 0
+                                ? 'Diskon (${order.discountPercent.toStringAsFixed(0)}%):'
+                                : 'Diskon Transaksi:',
+                            style: const TextStyle(fontSize: 10.5, color: Colors.redAccent, fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            '- ${_currencyFormat.format(order.discountAmount)}',
+                            style: const TextStyle(fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    // Service Charge jika ada
+                    if (order.serviceChargeAmount > 0) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Biaya Layanan:', style: TextStyle(fontSize: 10.5, color: textMuted)),
+                          Text(
+                            _currencyFormat.format(order.serviceChargeAmount),
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textColor),
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    // Pajak Restoran PB1 jika ada
+                    if (order.taxAmount > 0) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Pajak Resto (${settings.taxPercentage.toStringAsFixed(0)}%):', style: TextStyle(fontSize: 10.5, color: textMuted)),
+                          Text(
+                            _currencyFormat.format(order.taxAmount),
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textColor),
+                          ),
+                        ],
+                      ),
+                    ],
+
                     // Jika ada pembayaran uang muka QRIS sebelumnya
                     if (order.paidAmount > 0 && order.paidAmount < order.total) ...[
                       const SizedBox(height: 3),

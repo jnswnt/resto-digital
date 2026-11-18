@@ -21,6 +21,7 @@ import '../../services/notification_service.dart';
 import '../widgets/table_floor_card.dart';
 import '../widgets/table_action_sheet.dart';
 import '../widgets/payment_dialog.dart';
+import '../widgets/split_bill_dialog.dart';
 import '../widgets/whatsapp_receipt_dialog.dart';
 import 'shift_screen.dart';
 
@@ -1148,14 +1149,28 @@ class _OpenTabsScreenState extends State<OpenTabsScreen> {
                     ),
                   )
                 else
-                  ElevatedButton(
-                    onPressed: () => widget.onSelectTabForEdit(order),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryAmber,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: const Text('Buka / Bayar', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (order.items.length > 1 || (order.items.isNotEmpty && order.items.any((i) => i.qty > 1))) ...[
+                        IconButton(
+                          icon: const Icon(Icons.call_split_rounded, color: Color(0xFF6366F1), size: 18),
+                          tooltip: 'Pisah Tagihan (Split Bill)',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => SplitBillDialog.show(context: context, order: order),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      ElevatedButton(
+                        onPressed: () => widget.onSelectTabForEdit(order),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryAmber,
+                          foregroundColor: Colors.black,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Buka / Bayar', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
                   ),
               ],
             ),

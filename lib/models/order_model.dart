@@ -66,6 +66,12 @@ class OrderModel {
   final DateTime createdAt;
   final DateTime? completedAt;
 
+  // --- Diskon, Service Charge & Pajak Restoran (PB1) ---
+  final int discountAmount; // Potongan diskon transaksi dalam nominal rupiah
+  final double discountPercent; // Persentase diskon promo / member (%)
+  final int taxAmount; // Nilai Pajak Restoran PB1 yang dikenakan (Rp)
+  final int serviceChargeAmount; // Nilai Biaya Layanan yang dikenakan (Rp)
+
   // --- Pelacakan Siklus Kitchen Display System (KDS) ---
   final String kitchenStatus; // 'pending' (menunggu), 'cooking' (dimasak), 'ready' (siap saji), 'served' (disajikan)
   final DateTime? cookingStartedAt;
@@ -82,13 +88,24 @@ class OrderModel {
     this.onlineOrderId,
     DateTime? createdAt,
     this.completedAt,
+    this.discountAmount = 0,
+    this.discountPercent = 0.0,
+    this.taxAmount = 0,
+    this.serviceChargeAmount = 0,
     this.kitchenStatus = 'pending',
     this.cookingStartedAt,
     this.completedItemIds = const [],
   }) : createdAt = createdAt ?? DateTime.now();
 
+  /// Total kotor harga semua item sebelum diskon, biaya layanan, dan pajak
   int get subtotal => items.fold(0, (sum, item) => sum + item.total);
-  int get total => subtotal;
+
+  /// Subtotal bersih setelah dipotong diskon transaksi
+  int get subtotalAfterDiscount => (subtotal - discountAmount).clamp(0, 999999999);
+
+  /// Total akhir tagihan pesanan (Subtotal Bersih + Service Charge + Pajak Restoran)
+  int get total => (subtotalAfterDiscount + serviceChargeAmount + taxAmount).clamp(0, 999999999);
+
   int get totalItems => items.fold(0, (sum, item) => sum + item.qty);
 
   /// Sisa tagihan yang harus dibayar kasir setelah dipotong pembayaran di muka (misal QRIS mandiri)
@@ -115,6 +132,10 @@ class OrderModel {
       'onlineOrderId': onlineOrderId,
       'createdAt': createdAt.millisecondsSinceEpoch,
       'completedAt': completedAt?.millisecondsSinceEpoch,
+      'discountAmount': discountAmount,
+      'discountPercent': discountPercent,
+      'taxAmount': taxAmount,
+      'serviceChargeAmount': serviceChargeAmount,
       'kitchenStatus': kitchenStatus,
       'cookingStartedAt': cookingStartedAt?.millisecondsSinceEpoch,
       'completedItemIds': completedItemIds,
@@ -144,6 +165,10 @@ class OrderModel {
               ? DateTime.fromMillisecondsSinceEpoch(map['completedAt'] as int)
               : DateTime.tryParse(map['completedAt'].toString()))
           : null,
+      discountAmount: (map['discountAmount'] as num?)?.toInt() ?? 0,
+      discountPercent: (map['discountPercent'] as num?)?.toDouble() ?? 0.0,
+      taxAmount: (map['taxAmount'] as num?)?.toInt() ?? 0,
+      serviceChargeAmount: (map['serviceChargeAmount'] as num?)?.toInt() ?? 0,
       kitchenStatus: map['kitchenStatus'] ?? 'pending',
       cookingStartedAt: map['cookingStartedAt'] != null
           ? (map['cookingStartedAt'] is int
@@ -168,6 +193,10 @@ class OrderModel {
     String? onlineOrderId,
     DateTime? createdAt,
     DateTime? completedAt,
+    int? discountAmount,
+    double? discountPercent,
+    int? taxAmount,
+    int? serviceChargeAmount,
     String? kitchenStatus,
     DateTime? cookingStartedAt,
     List<String>? completedItemIds,
@@ -183,6 +212,10 @@ class OrderModel {
       onlineOrderId: onlineOrderId ?? this.onlineOrderId,
       createdAt: createdAt ?? this.createdAt,
       completedAt: completedAt ?? this.completedAt,
+      discountAmount: discountAmount ?? this.discountAmount,
+      discountPercent: discountPercent ?? this.discountPercent,
+      taxAmount: taxAmount ?? this.taxAmount,
+      serviceChargeAmount: serviceChargeAmount ?? this.serviceChargeAmount,
       kitchenStatus: kitchenStatus ?? this.kitchenStatus,
       cookingStartedAt: cookingStartedAt ?? this.cookingStartedAt,
       completedItemIds: completedItemIds ?? this.completedItemIds,

@@ -34,6 +34,12 @@ class SettingsModel {
   final String webOrderBaseUrl; // Domain URL Web Self-Ordering Meja
   final bool isCloudSyncEnabled; // Saklar aktivasi sinkronisasi cloud / mode offline-only
 
+  // --- Konfigurasi Pajak Restoran (PB1) & Biaya Layanan (Service Charge) ---
+  final bool enableTax; // Saklar aktivasi Pajak Restoran PB1 (on/off)
+  final double taxPercentage; // Tarif persentase Pajak Restoran PB1 (default 10.0%)
+  final bool enableServiceCharge; // Saklar aktivasi Biaya Layanan / Service Charge (on/off)
+  final double serviceChargePercentage; // Tarif persentase Biaya Layanan (default 5.0%)
+
   SettingsModel({
     this.storeName = 'Resto Digital',
     this.address = 'Jl. Kuliner No. 12, Nusantara',
@@ -65,6 +71,11 @@ class SettingsModel {
     this.firebaseApiKey = 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
     this.webOrderBaseUrl = 'https://restodigital-pos.web.app',
     this.isCloudSyncEnabled = true,
+    // Nilai default untuk Pajak PB1 & Service Charge
+    this.enableTax = false,
+    this.taxPercentage = 10.0,
+    this.enableServiceCharge = false,
+    this.serviceChargePercentage = 5.0,
   });
 
   Map<String, dynamic> toMap() {
@@ -96,6 +107,10 @@ class SettingsModel {
       'firebaseApiKey': firebaseApiKey,
       'webOrderBaseUrl': webOrderBaseUrl,
       'isCloudSyncEnabled': isCloudSyncEnabled,
+      'enableTax': enableTax,
+      'taxPercentage': taxPercentage,
+      'enableServiceCharge': enableServiceCharge,
+      'serviceChargePercentage': serviceChargePercentage,
     };
   }
 
@@ -130,6 +145,10 @@ class SettingsModel {
       firebaseApiKey: map['firebaseApiKey'] ?? 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
       webOrderBaseUrl: map['webOrderBaseUrl'] ?? 'https://restodigital-pos.web.app',
       isCloudSyncEnabled: map['isCloudSyncEnabled'] ?? true,
+      enableTax: map['enableTax'] ?? false,
+      taxPercentage: (map['taxPercentage'] as num?)?.toDouble() ?? 10.0,
+      enableServiceCharge: map['enableServiceCharge'] ?? false,
+      serviceChargePercentage: (map['serviceChargePercentage'] as num?)?.toDouble() ?? 5.0,
     );
   }
 
@@ -161,6 +180,10 @@ class SettingsModel {
     String? firebaseApiKey,
     String? webOrderBaseUrl,
     bool? isCloudSyncEnabled,
+    bool? enableTax,
+    double? taxPercentage,
+    bool? enableServiceCharge,
+    double? serviceChargePercentage,
   }) {
     return SettingsModel(
       storeName: storeName ?? this.storeName,
@@ -190,6 +213,11 @@ class SettingsModel {
       firebaseApiKey: firebaseApiKey ?? this.firebaseApiKey,
       webOrderBaseUrl: webOrderBaseUrl ?? this.webOrderBaseUrl,
       isCloudSyncEnabled: isCloudSyncEnabled ?? this.isCloudSyncEnabled,
+      enableTax: enableTax ?? this.enableTax,
+      taxPercentage: taxPercentage ?? this.taxPercentage,
+      enableServiceCharge: enableServiceCharge ?? this.enableServiceCharge,
+      serviceChargePercentage:
+          serviceChargePercentage ?? this.serviceChargePercentage,
     );
   }
 }
