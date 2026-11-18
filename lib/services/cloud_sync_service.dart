@@ -11,8 +11,9 @@ import '../models/table_call_model.dart';
 /// menangani panggilan bantuan pelayan dari meja (Call Waiter),
 /// serta mengelola autentikasi Firebase ID Token untuk hak akses kasir.
 class CloudSyncService {
-  final String projectId;
-  final String apiKey;
+  String projectId;
+  String apiKey;
+  String restoId;
   final http.Client _client;
 
   String? _idToken;
@@ -25,11 +26,38 @@ class CloudSyncService {
   CloudSyncService({
     this.projectId = 'restodigital-pos',
     this.apiKey = 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
+    this.restoId = 'default',
     http.Client? client,
   }) : _client = client ?? http.Client();
 
+  /// Memperbarui konfigurasi Cloud & Tenant secara dinamis saat pemilik toko mengubah pengaturan
+  void updateConfig({
+    String? projectId,
+    String? apiKey,
+    String? restoId,
+  }) {
+    if (projectId != null && projectId.isNotEmpty && projectId != this.projectId) {
+      this.projectId = projectId;
+      _idToken = null; // Reset token auth jika project berubah
+    }
+    if (apiKey != null && apiKey.isNotEmpty) {
+      this.apiKey = apiKey;
+    }
+    if (restoId != null) {
+      this.restoId = restoId.trim();
+    }
+  }
+
   String get _baseUrl =>
       'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents';
+
+  /// Mendapatkan path koleksi terisolasi berdasarkan restoId (Multi-Tenant)
+  String _getCollectionPath(String collectionName) {
+    if (restoId.isNotEmpty && restoId != 'default') {
+      return '$_baseUrl/restos/$restoId/$collectionName';
+    }
+    return '$_baseUrl/$collectionName';
+  }
 
   /// Memastikan aplikasi Kasir memiliki Firebase Auth ID Token yang valid
   /// menggunakan Anonymous Sign-In via Google Identity Toolkit REST API.
@@ -87,7 +115,8 @@ class CloudSyncService {
       for (final prod in products) {
         final isAvailable = !prod.trackStock || prod.stock > 0;
         final categoryDisplayName = _resolveCategoryName(prod.categoryId, categoryNames);
-        final docUrl = Uri.parse('$_baseUrl/resto_menu/${prod.id}?key=$apiKey');
+        final colPath = _getCollectionPath('resto_menu');
+        final docUrl = Uri.parse('$colPath/${prod.id}?key=$apiKey');
         final body = jsonEncode({
           'fields': {
             'id': {'stringValue': prod.id},
@@ -127,8 +156,9 @@ class CloudSyncService {
   Future<bool> syncMenuAvailability(String productId, bool isAvailable) async {
     try {
       await _ensureAuthenticated();
+      final colPath = _getCollectionPath('resto_menu');
       final url = Uri.parse(
-        '$_baseUrl/resto_menu/$productId?updateMask.fieldPaths=isAvailable&updateMask.fieldPaths=updatedAt&key=$apiKey',
+        '$colPath/$productId?updateMask.fieldPaths=isAvailable&updateMask.fieldPaths=updatedAt&key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -161,7 +191,13 @@ class CloudSyncService {
       final queryIso = todayStart.toUtc().toIso8601String();
 
       // Gunakan query Firestore runQuery untuk memfilter pesanan yang dibuat pada hari ini
-      final runQueryUrl = Uri.parse('$_baseUrl:runQuery?key=$apiKey');
+      final String runQueryUrlStr;
+      if (restoId.isNotEmpty && restoId != 'default') {
+        runQueryUrlStr = '$_baseUrl/restos/$restoId:runQuery?key=$apiKey';
+      } else {
+        runQueryUrlStr = '$_baseUrl:runQuery?key=$apiKey';
+      }
+      final runQueryUrl = Uri.parse(runQueryUrlStr);
       final queryBody = jsonEncode({
         'structuredQuery': {
           'from': [
@@ -223,7 +259,8 @@ class CloudSyncService {
   /// Fallback mengambil pesanan online dengan filter hari ini di memori jika runQuery tidak tersedia
   Future<List<OnlineOrderModel>> _fetchOnlineOrdersFallback(DateTime todayStart) async {
     try {
-      final url = Uri.parse('$_baseUrl/table_orders?pageSize=100&key=$apiKey');
+      final colPath = _getCollectionPath('table_orders');
+      final url = Uri.parse('$colPath?pageSize=100&key=$apiKey');
       final response = await _client.get(url, headers: _getHeaders());
 
       if (response.statusCode == 200) {
@@ -261,8 +298,9 @@ class CloudSyncService {
   Future<bool> updateOrderStatus(String orderId, String newStatus) async {
     try {
       await _ensureAuthenticated();
+      final colPath = _getCollectionPath('table_orders');
       final url = Uri.parse(
-        '$_baseUrl/table_orders/$orderId?updateMask.fieldPaths=status&updateMask.fieldPaths=updatedAt&key=$apiKey',
+        '$colPath/$orderId?updateMask.fieldPaths=status&updateMask.fieldPaths=updatedAt&key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -289,8 +327,9 @@ class CloudSyncService {
   Future<bool> updateOrderTableNo(String orderId, String newTableNo) async {
     try {
       await _ensureAuthenticated();
+      final colPath = _getCollectionPath('table_orders');
       final url = Uri.parse(
-        '$_baseUrl/table_orders/$orderId?updateMask.fieldPaths=tableNo&updateMask.fieldPaths=updatedAt&key=$apiKey',
+        '$colPath/$orderId?updateMask.fieldPaths=tableNo&updateMask.fieldPaths=updatedAt&key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -318,8 +357,9 @@ class CloudSyncService {
   Future<bool> markOrderAsPaid(String orderId, String paymentMethod) async {
     try {
       await _ensureAuthenticated();
+      final colPath = _getCollectionPath('table_orders');
       final url = Uri.parse(
-        '$_baseUrl/table_orders/$orderId?updateMask.fieldPaths=status&updateMask.fieldPaths=paymentStatus&updateMask.fieldPaths=paymentMethod&updateMask.fieldPaths=updatedAt&key=$apiKey',
+        '$colPath/$orderId?updateMask.fieldPaths=status&updateMask.fieldPaths=paymentStatus&updateMask.fieldPaths=paymentMethod&updateMask.fieldPaths=updatedAt&key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -354,8 +394,9 @@ class CloudSyncService {
   Future<bool> updatePaymentStatus(String orderId, String paymentStatus) async {
     try {
       await _ensureAuthenticated();
+      final colPath = _getCollectionPath('table_orders');
       final url = Uri.parse(
-        '$_baseUrl/table_orders/$orderId?updateMask.fieldPaths=paymentStatus&updateMask.fieldPaths=updatedAt&key=$apiKey',
+        '$colPath/$orderId?updateMask.fieldPaths=paymentStatus&updateMask.fieldPaths=updatedAt&key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -381,7 +422,8 @@ class CloudSyncService {
   /// Mengambil panggilan bantuan pelayan aktif dari koleksi `table_calls`
   Future<List<TableCallModel>> fetchTableCalls() async {
     try {
-      final url = Uri.parse('$_baseUrl/table_calls?key=$apiKey');
+      final colPath = _getCollectionPath('table_calls');
+      final url = Uri.parse('$colPath?key=$apiKey');
       final response = await _client.get(url, headers: _getHeaders());
 
       if (response.statusCode == 200) {
@@ -413,8 +455,9 @@ class CloudSyncService {
   Future<bool> resolveTableCall(String callId) async {
     try {
       await _ensureAuthenticated();
+      final colPath = _getCollectionPath('table_calls');
       final url = Uri.parse(
-        '$_baseUrl/table_calls/$callId?updateMask.fieldPaths=status&key=$apiKey',
+        '$colPath/$callId?updateMask.fieldPaths=status&key=$apiKey',
       );
 
       final body = jsonEncode({
@@ -440,7 +483,8 @@ class CloudSyncService {
   Future<bool> syncQrisConfigToCloud(String qrisPayload, String storeName) async {
     try {
       await _ensureAuthenticated();
-      final url = Uri.parse('$_baseUrl/resto_config/settings?key=$apiKey');
+      final colPath = _getCollectionPath('resto_config');
+      final url = Uri.parse('$colPath/settings?key=$apiKey');
       final body = jsonEncode({
         'fields': {
           'qrisPayload': {'stringValue': qrisPayload},
@@ -515,9 +559,11 @@ class CloudSyncService {
   Future<String?> uploadProductImage(Uint8List imageBytes, String filename) async {
     try {
       await _ensureAuthenticated();
-      const storageBucket = 'restodigital-pos.firebasestorage.app';
+      final storageBucket = '$projectId.firebasestorage.app';
       final cleanFilename = filename.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-      final objectPath = 'products/$cleanFilename';
+      final objectPath = (restoId.isNotEmpty && restoId != 'default')
+          ? '$restoId/products/$cleanFilename'
+          : 'products/$cleanFilename';
       final encodedPath = Uri.encodeComponent(objectPath);
 
       final uploadUrl = Uri.parse(

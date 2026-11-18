@@ -19,9 +19,14 @@ class TableQrGeneratorScreen extends StatefulWidget {
 class _TableQrGeneratorScreenState extends State<TableQrGeneratorScreen> {
   int _selectedTableNum = 1;
   final int _totalTables = 20;
-  final TextEditingController _baseUrlController = TextEditingController(
-    text: 'https://restodigital-pos.web.app',
-  );
+  late final TextEditingController _baseUrlController;
+
+  @override
+  void initState() {
+    super.initState();
+    final settings = context.read<SettingsProvider>().settings;
+    _baseUrlController = TextEditingController(text: settings.webOrderBaseUrl);
+  }
 
   @override
   void dispose() {
@@ -29,9 +34,13 @@ class _TableQrGeneratorScreenState extends State<TableQrGeneratorScreen> {
     super.dispose();
   }
 
-  String _getTableUrl(int tableNum) {
+  String _getTableUrl(int tableNum, String restoId) {
     final base = _baseUrlController.text.trim().replaceAll(RegExp(r'/+$'), '');
     final tableStr = tableNum.toString().padLeft(2, '0');
+    final cleanResto = restoId.trim();
+    if (cleanResto.isNotEmpty && cleanResto != 'default') {
+      return '$base/?resto=${Uri.encodeComponent(cleanResto)}&table=$tableStr';
+    }
     return '$base/?table=$tableStr';
   }
 
@@ -47,7 +56,7 @@ class _TableQrGeneratorScreenState extends State<TableQrGeneratorScreen> {
     final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
 
     final currentTableStr = _selectedTableNum.toString().padLeft(2, '0');
-    final currentUrl = _getTableUrl(_selectedTableNum);
+    final currentUrl = _getTableUrl(_selectedTableNum, settings.restoId);
 
     return Scaffold(
       backgroundColor: isDark ? AppTheme.darkScaffold : AppTheme.lightScaffold,

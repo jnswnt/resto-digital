@@ -8,6 +8,7 @@ import 'package:mini_resto_pos/models/online_order_model.dart';
 import 'package:mini_resto_pos/models/order_model.dart';
 import 'package:mini_resto_pos/models/table_call_model.dart';
 import 'package:mini_resto_pos/services/cloud_sync_service.dart';
+import 'package:mini_resto_pos/services/database_helper.dart';
 import 'package:mini_resto_pos/services/storage_service.dart';
 import 'package:mini_resto_pos/services/kitchen_ticket_service.dart';
 import 'package:mini_resto_pos/services/sound_service.dart';
@@ -206,7 +207,9 @@ void main() {
     test('3.1 Verifikasi QRIS Online: Memperbarui status di cloud dan mengupdate paidAmount pesanan meja di PosProvider lokal', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
-      final storageService = StorageService(prefs);
+      final dbHelper = DatabaseHelper();
+      await dbHelper.initDatabase(customPath: inMemoryDatabasePath);
+      final storageService = StorageService(prefs, dbHelper);
       final posProvider = PosProvider(storageService);
 
       // 1. Buat pesanan meja terbuka di PosProvider dengan DP 0 (menunggu verifikasi QRIS)
@@ -301,6 +304,44 @@ void main() {
       expect(orders.length, equals(1));
       expect(orders.first.orderId, equals('ORD-TODAY-01'));
       expect(orders.first.customerName, equals('Tamu Hari Ini'));
+    });
+
+    test('3.3 Multi-Tenant Resto Isolation: CloudSyncService mengarahkan koleksi ke /restos/{restoId} saat restoId dikonfigurasi', () async {
+      final requestedUrls = <String>[];
+      final mockClient = MockClient((request) async {
+        requestedUrls.add(request.url.toString());
+        return http.Response(jsonEncode({'name': request.url.path}), 200);
+      });
+
+      // Inisialisasi service dengan tenant kustom
+      final syncService = CloudSyncService(
+        projectId: 'resto-custom-project',
+        apiKey: 'custom_key_123',
+        restoId: 'warkop_berkah_01',
+        client: mockClient,
+      );
+
+      // 1. Eksekusi update ketersediaan menu
+      await syncService.syncMenuAvailability('p1', false);
+
+      // Verifikasi URL mencakup namespace multi-tenant
+      expect(requestedUrls.any((u) => u.contains('restos/warkop_berkah_01/resto_menu/p1')), isTrue);
+      expect(requestedUrls.any((u) => u.contains('projects/resto-custom-project')), isTrue);
+
+      // 2. Eksekusi markOrderAsPaid
+      await syncService.markOrderAsPaid('ORD-123', 'qris');
+      expect(requestedUrls.any((u) => u.contains('restos/warkop_berkah_01/table_orders/ORD-123')), isTrue);
+
+      // 3. Eksekusi resolveTableCall
+      await syncService.resolveTableCall('CALL-999');
+      expect(requestedUrls.any((u) => u.contains('restos/warkop_berkah_01/table_calls/CALL-999')), isTrue);
+
+      // 4. UpdateConfig beralih kembali ke default
+      syncService.updateConfig(restoId: 'default');
+      requestedUrls.clear();
+
+      await syncService.syncMenuAvailability('p2', true);
+      expect(requestedUrls.any((u) => u.contains('/resto_menu/p2') && !u.contains('restos/')), isTrue);
     });
   });
 }

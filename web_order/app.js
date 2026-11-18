@@ -36,6 +36,29 @@ try {
   console.warn("Firestore inisialisasi tertunda / mode fallback:", err);
 }
 
+// 1.1 DETEKSI RESTO ID (MULTI-TENANT ISOLATION)
+// Membaca ID Resto dari query URL (?resto=...) atau LocalStorage agar data menu dan pesanan
+// terpisah antar restoran meskipun menggunakan domain/proyek web order yang sama.
+const urlParamsGlobal = new URLSearchParams(window.location.search);
+let currentRestoId = (urlParamsGlobal.get("resto") || urlParamsGlobal.get("r") || localStorage.getItem("pos_resto_id") || "default").trim();
+if (urlParamsGlobal.get("resto") || urlParamsGlobal.get("r")) {
+  localStorage.setItem("pos_resto_id", currentRestoId);
+}
+
+/**
+ * Mengembalikan objek Firestore CollectionReference sesuai tenant resto aktif.
+ * Jika currentRestoId bukan 'default', data diarahkan ke subkoleksi /restos/{restoId}/{collectionName}
+ */
+function getRestoCollection(collectionName) {
+  if (db) {
+    if (currentRestoId && currentRestoId !== "default") {
+      return db.collection("restos").doc(currentRestoId).collection(collectionName);
+    }
+    return db.collection(collectionName);
+  }
+  return null;
+}
+
 // 2. STARTER MENU FALLBACK DENGAN FIELD KETERSEDIAAN (isAvailable)
 const STARTER_MENU = [
   {
@@ -621,35 +644,40 @@ async function loadMenuAndConfigFromFirestore() {
 
   try {
     // Ambil menu resto realtime
-    db.collection("resto_menu").onSnapshot(snapshot => {
-      if (!snapshot.empty) {
-        const items = [];
-        snapshot.forEach(doc => {
-          const d = doc.data();
-          // Gunakan formatCategoryName agar ID teknis seperti cat_makanan otomatis menjadi nama ramah (Makanan Utama)
-          const rawCat = d.categoryName || d.category || d.categoryId || "Makanan Utama";
-          items.push({
-            id: doc.id,
-            name: d.name,
-            price: d.price || d.sellPrice || 0,
-            category: formatCategoryName(rawCat),
-            description: d.description || "Menu lezat pilihan resto kami.",
-            icon: d.icon || "🍽️",
-            imageUrl: d.imageUrl,
-            isAvailable: d.isAvailable !== undefined ? d.isAvailable : true,
-            isSpicy: d.isSpicy || false,
-            isBestSeller: d.isBestSeller || false,
-            isRecommended: d.isRecommended || false
+    const menuCol = getRestoCollection("resto_menu");
+    if (menuCol) {
+      menuCol.onSnapshot(snapshot => {
+        if (!snapshot.empty) {
+          const items = [];
+          snapshot.forEach(doc => {
+            const d = doc.data();
+            // Gunakan formatCategoryName agar ID teknis seperti cat_makanan otomatis menjadi nama ramah (Makanan Utama)
+            const rawCat = d.categoryName || d.category || d.categoryId || "Makanan Utama";
+            items.push({
+              id: doc.id,
+              name: d.name,
+              price: d.price || d.sellPrice || 0,
+              category: formatCategoryName(rawCat),
+              description: d.description || "Menu lezat pilihan resto kami.",
+              icon: d.icon || "🍽️",
+              imageUrl: d.imageUrl,
+              isAvailable: d.isAvailable !== undefined ? d.isAvailable : true,
+              isSpicy: d.isSpicy || false,
+              isBestSeller: d.isBestSeller || false,
+              isRecommended: d.isRecommended || false
+            });
           });
-        });
-        menuCatalog = items;
-        renderCategoryChips();
-        renderMenu();
-      }
-    }, err => console.warn("Listener menu realtime:", err));
+          menuCatalog = items;
+          renderCategoryChips();
+          renderMenu();
+        }
+      }, err => console.warn("Listener menu realtime:", err));
+    }
 
     // Hubungkan konfigurasi QRIS toko & profil resto secara realtime dari Cloud Firestore
-    db.collection("resto_config").doc("settings").onSnapshot((doc) => {
+    const configCol = getRestoCollection("resto_config");
+    if (configCol) {
+      configCol.doc("settings").onSnapshot((doc) => {
       if (doc.exists) {
         const data = doc.data();
         if (data.qrisPayload && data.qrisPayload.trim().length > 10) {
@@ -992,11 +1020,14 @@ async function sendCallWaiter() {
 
   try {
     if (db) {
-      await withTimeout(
-        db.collection("table_calls").doc(callId).set(callData),
-        4000,
-        "Koneksi cloud lambat"
-      );
+      const callsCol = getRestoCollection("table_calls");
+      if (callsCol) {
+        await withTimeout(
+          callsCol.doc(callId).set(callData),
+          4000,
+          "Koneksi cloud lambat"
+        );
+      }
     }
   } catch (err) {
     console.warn("Koneksi cloud Firestore lambat/offline:", err);
@@ -1156,11 +1187,14 @@ async function submitOrder() {
   // 2. Kirim ke Cloud Firestore dengan proteksi timeout 5 detik
   try {
     if (db) {
-      await withTimeout(
-        db.collection("table_orders").doc(orderId).set(orderData),
-        5000,
-        "Waktu koneksi cloud habis, pesanan dialihkan ke antrean lokal."
-      );
+      const ordersCol = getRestoCollection("table_orders");
+      if (ordersCol) {
+        await withTimeout(
+          ordersCol.doc(orderId).set(orderData),
+          5000,
+          "Waktu koneksi cloud habis, pesanan dialihkan ke antrean lokal."
+        );
+      }
     }
   } catch (err) {
     console.warn("Koneksi cloud Firestore lambat atau gagal, pesanan tetap diproses via data lokal:", err);
@@ -1264,10 +1298,13 @@ function showQrisPaymentModal(orderId, amount, orderData) {
     confirmPaidBtnEl.innerHTML = `<span>Menyimpan Konfirmasi...</span> ⏳`;
     if (db) {
       try {
-        await db.collection("table_orders").doc(orderId).update({
-          paymentStatus: "waiting_verification",
-          updatedAt: new Date().toISOString()
-        });
+        const ordersCol = getRestoCollection("table_orders");
+        if (ordersCol) {
+          await ordersCol.doc(orderId).update({
+            paymentStatus: "waiting_verification",
+            updatedAt: new Date().toISOString()
+          });
+        }
       } catch (err) {
         console.warn("Gagal update paymentStatus ke waiting_verification:", err);
       }
@@ -1303,8 +1340,10 @@ function startOrderTracking(orderId, initialData) {
   }
 
   if (db) {
-    orderTrackerUnsubscribe = db.collection("table_orders").doc(orderId)
-      .onSnapshot((doc) => {
+    const ordersCol = getRestoCollection("table_orders");
+    if (ordersCol) {
+      orderTrackerUnsubscribe = ordersCol.doc(orderId)
+        .onSnapshot((doc) => {
         if (doc.exists) {
           const updated = doc.data();
           
@@ -1491,8 +1530,10 @@ function checkExistingActiveOrder() {
 
     // Jalankan listener Firestore di latar belakang dan perbarui UI tracker button
     if (db) {
-      orderTrackerUnsubscribe = db.collection("table_orders").doc(activeOrderId)
-        .onSnapshot((doc) => {
+      const ordersCol = getRestoCollection("table_orders");
+      if (ordersCol) {
+        orderTrackerUnsubscribe = ordersCol.doc(activeOrderId)
+          .onSnapshot((doc) => {
           if (doc.exists) {
             const updated = doc.data();
             if (updated.tableNo && updated.tableNo !== tableNumber) {

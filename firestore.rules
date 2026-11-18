@@ -2,53 +2,90 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 1. Koleksi Katalog Menu Restoran (resto_menu)
-    // Tamu web hanya boleh membaca menu, penambahan/perubahan harga hanya oleh kasir terautentikasi.
-    match /resto_menu/{menuId} {
-      allow read: if true;
-      allow write: if request.auth != null;
+    // Helper functions keamanan bersama
+    function isKasir() {
+      return request.auth != null;
     }
 
-    // 2. Koleksi Konfigurasi Toko & QRIS (resto_config & resto_settings)
-    // Tamu dapat membaca profil & payload QRIS toko untuk bayar online; pengubahan hanya oleh kasir.
+    // =========================================================================
+    // 1. ATURAN KOLEKSI ROOT (Default & Kompatibilitas)
+    // =========================================================================
+
+    match /resto_menu/{menuId} {
+      allow read: if true;
+      allow write: if isKasir();
+    }
+
     match /resto_config/{configId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isKasir();
     }
     match /resto_settings/{settingId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isKasir();
     }
 
-    // 3. Koleksi Pesanan Meja Tamu (table_orders)
-    // Tamu hanya boleh membuat pesanan baru dengan validasi skema ketat.
-    // Manipulasi status pesanan dan penghapusan hanya boleh dilakukan oleh Kasir terautentikasi.
     match /table_orders/{orderId} {
       allow read: if true;
-
-      // Tamu membuat pesanan baru dengan status pending
       allow create: if request.resource.data.status == 'pending'
                     && request.resource.data.tableNo is string
                     && request.resource.data.customerName is string
                     && request.resource.data.totalAmount > 0
                     && request.resource.data.items is list;
-
-      // Pembaruan status (misal: disajikan / ditolak / verifikasi QRIS) dan pelunasan:
-      // Kasir terautentikasi memiliki akses penuh.
-      // Tamu web (unauthenticated) HANYA diperbolehkan mengirim sinyal 'waiting_verification' untuk QRIS mandiri.
-      allow update: if request.auth != null
+      allow update: if isKasir()
                     || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'updatedAt'])
                         && request.resource.data.paymentStatus == 'waiting_verification');
-      allow delete: if request.auth != null;
+      allow delete: if isKasir();
     }
 
-    // 4. Koleksi Panggilan Bantuan Pelayan (table_calls)
-    // Tamu hanya boleh membuat panggilan dengan status 'pending'. Penyelesaian panggilan oleh kasir.
     match /table_calls/{callId} {
       allow read: if true;
       allow create: if request.resource.data.status == 'pending'
                     && request.resource.data.tableNo is string;
-      allow update, delete: if request.auth != null;
+      allow update, delete: if isKasir();
+    }
+
+    // =========================================================================
+    // 2. ATURAN MULTI-TENANT ISOLASI RESTORAN (/restos/{restoId}/...)
+    // =========================================================================
+
+    match /restos/{restoId} {
+      allow read: if true;
+      allow write: if isKasir();
+
+      match /resto_menu/{menuId} {
+        allow read: if true;
+        allow write: if isKasir();
+      }
+
+      match /resto_config/{configId} {
+        allow read: if true;
+        allow write: if isKasir();
+      }
+      match /resto_settings/{settingId} {
+        allow read: if true;
+        allow write: if isKasir();
+      }
+
+      match /table_orders/{orderId} {
+        allow read: if true;
+        allow create: if request.resource.data.status == 'pending'
+                      && request.resource.data.tableNo is string
+                      && request.resource.data.customerName is string
+                      && request.resource.data.totalAmount > 0
+                      && request.resource.data.items is list;
+        allow update: if isKasir()
+                      || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'updatedAt'])
+                          && request.resource.data.paymentStatus == 'waiting_verification');
+        allow delete: if isKasir();
+      }
+
+      match /table_calls/{callId} {
+        allow read: if true;
+        allow create: if request.resource.data.status == 'pending'
+                      && request.resource.data.tableNo is string;
+        allow update, delete: if isKasir();
+      }
     }
   }
 }

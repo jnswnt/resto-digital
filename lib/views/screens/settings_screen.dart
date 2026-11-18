@@ -10,6 +10,7 @@ import 'cashier_management_screen.dart';
 import 'qris_config_screen.dart';
 import 'table_qr_generator_screen.dart';
 import 'printer_settings_screen.dart';
+import 'cloud_config_screen.dart';
 import '../widgets/owner_profile_dialog.dart';
 
 /// Layar Pengaturan Utama (List Sub Menu - Bebas Tab)
@@ -245,6 +246,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const QrisConfigScreen()),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+
+              _buildMenuCard(
+                context: context,
+                icon: Icons.cloud_sync_rounded,
+                iconBg: const Color(0xFF0284C7),
+                title: 'Integrasi Cloud & Multi-Tenant',
+                subtitle: 'Pengaturan Firebase, Resto ID (isolasi data antar cabang), dan domain Web Self-Ordering.',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CloudConfigScreen()),
                   );
                 },
               ),

@@ -25,7 +25,12 @@ void main() async {
 
   // Inisialisasi penyimpanan lokal dan starter kit resto
   final storageService = await StorageService.init();
-  final cloudSyncService = CloudSyncService();
+  final settings = storageService.getSettings();
+  final cloudSyncService = CloudSyncService(
+    projectId: settings.firebaseProjectId,
+    apiKey: settings.firebaseApiKey,
+    restoId: settings.restoId,
+  );
 
   // Inisialisasi Notifikasi Sistem & Layanan Latar Belakang Android (Khusus platform Native Android)
   if (!kIsWeb) {

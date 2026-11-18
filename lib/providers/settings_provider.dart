@@ -230,4 +230,23 @@ class SettingsProvider with ChangeNotifier {
     await _storageService.saveUsers(_users);
     notifyListeners();
   }
+
+  /// Memperbarui konfigurasi Integrasi Cloud & Multi-Tenant (Firebase & Resto ID)
+  Future<void> updateCloudConfig({
+    required String restoId,
+    required String firebaseProjectId,
+    required String firebaseApiKey,
+    required String webOrderBaseUrl,
+    required bool isCloudSyncEnabled,
+  }) async {
+    _settings = _settings.copyWith(
+      restoId: restoId.trim(),
+      firebaseProjectId: firebaseProjectId.trim(),
+      firebaseApiKey: firebaseApiKey.trim(),
+      webOrderBaseUrl: webOrderBaseUrl.trim(),
+      isCloudSyncEnabled: isCloudSyncEnabled,
+    );
+    await _storageService.saveSettings(_settings);
+    notifyListeners();
+  }
 }

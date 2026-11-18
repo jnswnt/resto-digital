@@ -81,6 +81,28 @@ class OnlineOrderProvider with ChangeNotifier {
     _pollingTimer = null;
   }
 
+  /// Memperbarui konfigurasi CloudSyncService secara dinamis saat pengaturan cloud berubah
+  void syncWithSettings(dynamic settings) {
+    _syncService.updateConfig(
+      projectId: settings.firebaseProjectId as String?,
+      apiKey: settings.firebaseApiKey as String?,
+      restoId: settings.restoId as String?,
+    );
+    final isEnabled = settings.isCloudSyncEnabled as bool? ?? true;
+    if (!isEnabled) {
+      stopListening();
+      _onlineOrders = [];
+      _tableCalls = [];
+      notifyListeners();
+    } else {
+      if (_pollingTimer == null) {
+        startListening();
+      } else {
+        fetchAll();
+      }
+    }
+  }
+
   /// Mengambil daftar pesanan online dan panggilan pelayan dari cloud
   Future<void> fetchAll() async {
     _isLoading = true;

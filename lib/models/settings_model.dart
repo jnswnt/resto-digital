@@ -27,6 +27,13 @@ class SettingsModel {
   final bool showOrderNotes; // Tampilkan catatan khusus per menu di struk
   final bool showQrFooter; // Tampilkan barcode / QR code di bagian bawah struk
 
+  // --- Konfigurasi Cloud Firebase & Multi-Tenant (Isolasi Cabang Resto) ---
+  final String restoId; // ID Unik Restoran / Tenant Slug (contoh: 'default', 'warkop_berkah')
+  final String firebaseProjectId; // Project ID Firebase Firestore
+  final String firebaseApiKey; // Web API Key Firebase Identity & Firestore
+  final String webOrderBaseUrl; // Domain URL Web Self-Ordering Meja
+  final bool isCloudSyncEnabled; // Saklar aktivasi sinkronisasi cloud / mode offline-only
+
   SettingsModel({
     this.storeName = 'Resto Digital',
     this.address = 'Jl. Kuliner No. 12, Nusantara',
@@ -52,6 +59,12 @@ class SettingsModel {
     this.showCashierName = true,
     this.showOrderNotes = true,
     this.showQrFooter = true,
+    // Nilai default untuk integrasi cloud & tenant
+    this.restoId = 'default',
+    this.firebaseProjectId = 'restodigital-pos',
+    this.firebaseApiKey = 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
+    this.webOrderBaseUrl = 'https://restodigital-pos.web.app',
+    this.isCloudSyncEnabled = true,
   });
 
   Map<String, dynamic> toMap() {
@@ -78,6 +91,11 @@ class SettingsModel {
       'showCashierName': showCashierName,
       'showOrderNotes': showOrderNotes,
       'showQrFooter': showQrFooter,
+      'restoId': restoId,
+      'firebaseProjectId': firebaseProjectId,
+      'firebaseApiKey': firebaseApiKey,
+      'webOrderBaseUrl': webOrderBaseUrl,
+      'isCloudSyncEnabled': isCloudSyncEnabled,
     };
   }
 
@@ -107,6 +125,11 @@ class SettingsModel {
       showCashierName: map['showCashierName'] ?? true,
       showOrderNotes: map['showOrderNotes'] ?? true,
       showQrFooter: map['showQrFooter'] ?? true,
+      restoId: map['restoId'] ?? 'default',
+      firebaseProjectId: map['firebaseProjectId'] ?? 'restodigital-pos',
+      firebaseApiKey: map['firebaseApiKey'] ?? 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
+      webOrderBaseUrl: map['webOrderBaseUrl'] ?? 'https://restodigital-pos.web.app',
+      isCloudSyncEnabled: map['isCloudSyncEnabled'] ?? true,
     );
   }
 
@@ -133,6 +156,11 @@ class SettingsModel {
     bool? showCashierName,
     bool? showOrderNotes,
     bool? showQrFooter,
+    String? restoId,
+    String? firebaseProjectId,
+    String? firebaseApiKey,
+    String? webOrderBaseUrl,
+    bool? isCloudSyncEnabled,
   }) {
     return SettingsModel(
       storeName: storeName ?? this.storeName,
@@ -157,6 +185,11 @@ class SettingsModel {
       showCashierName: showCashierName ?? this.showCashierName,
       showOrderNotes: showOrderNotes ?? this.showOrderNotes,
       showQrFooter: showQrFooter ?? this.showQrFooter,
+      restoId: restoId ?? this.restoId,
+      firebaseProjectId: firebaseProjectId ?? this.firebaseProjectId,
+      firebaseApiKey: firebaseApiKey ?? this.firebaseApiKey,
+      webOrderBaseUrl: webOrderBaseUrl ?? this.webOrderBaseUrl,
+      isCloudSyncEnabled: isCloudSyncEnabled ?? this.isCloudSyncEnabled,
     );
   }
 }
