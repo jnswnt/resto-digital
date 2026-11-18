@@ -142,9 +142,9 @@ class OnlineOrderModel {
       if (item is Map<String, dynamic>) {
         return OrderItem(
           productId: item['id'] ?? item['productId'] ?? '',
-          name: item['name'] ?? '',
+          name: item['name'] ?? item['productName'] ?? 'Menu',
           price: (item['price'] as num?)?.toInt() ?? 0,
-          qty: (item['qty'] as num?)?.toInt() ?? 1,
+          qty: (item['qty'] ?? item['quantity'] as num?)?.toInt() ?? 1,
           notes: item['note'] ?? item['notes'] ?? '',
         );
       }
@@ -160,12 +160,14 @@ class OnlineOrderModel {
       return DateTime.now();
     }
 
+    final total = (map['totalAmount'] ?? map['totalPrice'] as num?)?.toInt() ?? 0;
+
     return OnlineOrderModel(
-      orderId: map['orderId'] ?? docId ?? '',
+      orderId: map['orderId'] ?? map['id'] ?? docId ?? '',
       tableNo: (map['tableNo'] ?? '').toString(),
       customerName: map['customerName'] ?? 'Pelanggan Meja',
       items: parsedItems,
-      totalAmount: (map['totalAmount'] as num?)?.toInt() ?? 0,
+      totalAmount: total,
       status: map['status'] ?? 'pending',
       paymentMethod: map['paymentMethod'] ?? 'cashier',
       paymentStatus: map['paymentStatus'] ?? 'unpaid',

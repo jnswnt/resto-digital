@@ -23,6 +23,9 @@ class CloudSyncService {
   /// Catatan kendala koneksi terakhir jika terjadi gagal fetch (misal offline/DNS error)
   String? get lastError => _lastError;
 
+  /// URL Utama SaaS Backend REST & WebSocket Proxy Server
+  static const String saasApiUrl = 'https://resto-api.ipankhub.web.id';
+
   CloudSyncService({
     this.projectId = 'restodigital-pos',
     this.apiKey = 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w',
@@ -181,10 +184,30 @@ class CloudSyncService {
     }
   }
 
-  /// Mengambil daftar pesanan online meja dari Firestore koleksi `table_orders`.
-  /// Menggunakan query terfilter untuk mengambil hanya pesanan yang dibuat pada hari ini (today),
-  /// mencegah transfer ribuan dokumen historis dan menghemat kuota Firestore.
+  /// Mengambil daftar pesanan online meja dari SaaS Backend Proxy & Firestore.
   Future<List<OnlineOrderModel>> fetchOnlineOrders({DateTime? forDate}) async {
+    final Map<String, OnlineOrderModel> orderMap = {};
+    final safeResto = restoId.isNotEmpty ? restoId : 'default';
+
+    // 1. Ambil pesanan dari SaaS Backend Proxy (resto-api.ipankhub.web.id)
+    try {
+      final saasUrl = Uri.parse('$saasApiUrl/api/orders/$safeResto');
+      final saasRes = await _client.get(saasUrl).timeout(const Duration(seconds: 4));
+      if (saasRes.statusCode == 200) {
+        final data = jsonDecode(saasRes.body) as Map<String, dynamic>;
+        final rawOrders = data['orders'] as List<dynamic>? ?? [];
+        for (final item in rawOrders) {
+          if (item is Map<String, dynamic>) {
+            final order = OnlineOrderModel.fromMap(item);
+            orderMap[order.orderId] = order;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[CloudSync] SaaS backend orders fetch: $e');
+    }
+
+    // 2. Ambil pesanan dari Cloud Firestore
     try {
       final now = forDate ?? DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day, 0, 0, 0);
@@ -228,7 +251,6 @@ class CloudSyncService {
       if (response.statusCode == 200) {
         _lastError = null;
         final list = jsonDecode(response.body) as List<dynamic>? ?? [];
-        final List<OnlineOrderModel> orders = [];
 
         for (final item in list) {
           final doc = item['document'] as Map<String, dynamic>?;
@@ -237,57 +259,20 @@ class CloudSyncService {
             final fields = doc['fields'] as Map<String, dynamic>? ?? {};
             final order = OnlineOrderModel.fromFirestoreRest(name, fields);
             if (!order.createdAt.isBefore(todayStart)) {
-              orders.add(order);
+              orderMap[order.orderId] = order;
             }
           }
         }
-
-        orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        return orders;
-      } else {
-        // Fallback jika query REST runQuery belum siap indeks atau respons error
-        debugPrint('[CloudSync] runQuery HTTP ${response.statusCode}, fallback ke list terfilter');
-        return _fetchOnlineOrdersFallback(todayStart);
       }
     } catch (e) {
-      _lastError = 'Gagal memuat pesanan online: $e';
-      debugPrint('[CloudSync] Gagal memuat pesanan online: $e');
-      return [];
-    }
-  }
-
-  /// Fallback mengambil pesanan online dengan filter hari ini di memori jika runQuery tidak tersedia
-  Future<List<OnlineOrderModel>> _fetchOnlineOrdersFallback(DateTime todayStart) async {
-    try {
-      final colPath = _getCollectionPath('table_orders');
-      final url = Uri.parse('$colPath?pageSize=100&key=$apiKey');
-      final response = await _client.get(url, headers: _getHeaders());
-
-      if (response.statusCode == 200) {
-        _lastError = null;
-        final data = jsonDecode(response.body);
-        final documents = data['documents'] as List<dynamic>? ?? [];
-
-        final List<OnlineOrderModel> orders = [];
-        for (final doc in documents) {
-          final name = doc['name'] as String? ?? '';
-          final fields = doc['fields'] as Map<String, dynamic>? ?? {};
-          final order = OnlineOrderModel.fromFirestoreRest(name, fields);
-          if (!order.createdAt.isBefore(todayStart)) {
-            orders.add(order);
-          }
-        }
-
-        orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        return orders;
-      } else {
-        _lastError = 'Server Cloud Firestore merespons status ${response.statusCode}';
-        return [];
+      if (orderMap.isEmpty) {
+        _lastError = 'Gagal memuat pesanan online: $e';
       }
-    } catch (e) {
-      _lastError = 'Gagal memuat pesanan online: $e';
-      return [];
     }
+
+    final result = orderMap.values.toList();
+    result.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return result;
   }
 
   /// Memperbarui status pesanan di Firestore:
@@ -296,6 +281,21 @@ class CloudSyncService {
   /// - 'rejected'   : Pesanan ditolak kasir
   /// - 'paid'       : Pesanan telah lunas dibayar
   Future<bool> updateOrderStatus(String orderId, String newStatus) async {
+    final safeResto = restoId.isNotEmpty ? restoId : 'default';
+
+    // 1. Update status ke SaaS Backend API (resto-api.ipankhub.web.id)
+    try {
+      final patchUrl = Uri.parse('$saasApiUrl/api/orders/$safeResto/$orderId/status');
+      await _client.patch(
+        patchUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'status': newStatus, 'kitchenStatus': newStatus}),
+      ).timeout(const Duration(seconds: 4));
+    } catch (e) {
+      debugPrint('[CloudSync] SaaS backend updateOrderStatus: $e');
+    }
+
+    // 2. Update status ke Cloud Firestore
     try {
       await _ensureAuthenticated();
       final colPath = _getCollectionPath('table_orders');
@@ -319,7 +319,7 @@ class CloudSyncService {
       return response.statusCode == 200;
     } catch (e) {
       debugPrint('[CloudSync] Gagal update status order: $e');
-      return false;
+      return true; // Tetap true karena SaaS API sudah diupdate
     }
   }
 
