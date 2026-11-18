@@ -706,15 +706,16 @@ async function loadMenuAndConfigFromFirestore() {
     const configCol = getRestoCollection("resto_config");
     if (configCol) {
       configCol.doc("settings").onSnapshot((doc) => {
-      if (doc.exists) {
-        const data = doc.data();
-        if (data.qrisPayload && data.qrisPayload.trim().length > 10) {
-          currentStoreQrisPayload = data.qrisPayload.trim();
-          console.log("Konfigurasi QRIS toko terhubung realtime dari kasir:", currentStoreQrisPayload.slice(0, 30) + "...");
+        if (doc.exists) {
+          const data = doc.data();
+          if (data.qrisPayload && data.qrisPayload.trim().length > 10) {
+            currentStoreQrisPayload = data.qrisPayload.trim();
+            console.log("Konfigurasi QRIS toko terhubung realtime dari kasir:", currentStoreQrisPayload.slice(0, 30) + "...");
+          }
+          if (data.storeName) storeNameEl.textContent = data.storeName;
         }
-        if (data.storeName) storeNameEl.textContent = data.storeName;
-      }
-    }, err => console.warn("Listener konfigurasi QRIS realtime:", err));
+      }, err => console.warn("Listener konfigurasi QRIS realtime:", err));
+    }
   } catch (err) {
     console.warn("Menggunakan katalog menu default:", err.message);
   }
@@ -1445,6 +1446,7 @@ function startOrderTracking(orderId, initialData) {
       }, (err) => {
         console.warn("Listener status pesanan:", err);
       });
+    }
   }
 }
 
@@ -1616,6 +1618,7 @@ function checkExistingActiveOrder() {
             updateActiveOrderTrackerUI();
           }
         }, (err) => console.warn("Background order listener:", err));
+      }
     }
     updateActiveOrderTrackerUI();
   }
