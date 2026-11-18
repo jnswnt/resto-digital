@@ -3,12 +3,13 @@ import 'package:provider/provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/online_order_provider.dart';
 import '../../providers/pos_provider.dart';
+import '../../services/cloud_sync_service.dart';
 import '../../theme/app_theme.dart';
 
-/// Halaman Sub-Menu Khusus: Pengaturan Integrasi Cloud & Multi-Tenant Resto.
-/// Memungkinkan pemilik resto mengatur kredensial Firebase mandiri,
-/// menentukan Resto/Tenant ID unik untuk mengisolasi data antar cabang/pembeli,
-/// serta mengatur domain Web Self-Ordering meja.
+/// Halaman Pengaturan Integrasi Cloud SaaS & Multi-Tenant Resto.
+/// 
+/// Mengelola sinkronisasi pesanan meja online, konfigurasi Resto ID untuk cabang,
+/// serta pemantauan koneksi ke Server SaaS Mandiri (resto-api.ipankhub.web.id).
 class CloudConfigScreen extends StatefulWidget {
   const CloudConfigScreen({super.key});
 
@@ -18,36 +19,49 @@ class CloudConfigScreen extends StatefulWidget {
 
 class _CloudConfigScreenState extends State<CloudConfigScreen> {
   late final TextEditingController _restoIdCtrl;
-  late final TextEditingController _projectIdCtrl;
-  late final TextEditingController _apiKeyCtrl;
+  late final TextEditingController _serverUrlCtrl;
   late final TextEditingController _webUrlCtrl;
   late bool _isCloudSyncEnabled;
 
   bool _isSaving = false;
   bool _isTestingSync = false;
-  bool _obscureApiKey = true;
+  bool _isTestingConnection = false;
+  bool? _isServerOnline;
 
   @override
   void initState() {
     super.initState();
     final settings = context.read<SettingsProvider>().settings;
     _restoIdCtrl = TextEditingController(text: settings.restoId);
-    _projectIdCtrl = TextEditingController(text: settings.firebaseProjectId);
-    _apiKeyCtrl = TextEditingController(text: settings.firebaseApiKey);
+    _serverUrlCtrl = TextEditingController(text: CloudSyncService.defaultServerUrl);
     _webUrlCtrl = TextEditingController(text: settings.webOrderBaseUrl);
     _isCloudSyncEnabled = settings.isCloudSyncEnabled;
+
+    _checkServerHealth();
   }
 
   @override
   void dispose() {
     _restoIdCtrl.dispose();
-    _projectIdCtrl.dispose();
-    _apiKeyCtrl.dispose();
+    _serverUrlCtrl.dispose();
     _webUrlCtrl.dispose();
     super.dispose();
   }
 
-  /// Menyimpan seluruh konfigurasi cloud dan menyelaraskannya ke provider aktif
+  /// Mengecek status kesehatan server backend SaaS
+  Future<void> _checkServerHealth() async {
+    setState(() => _isTestingConnection = true);
+    final service = CloudSyncService(serverUrl: _serverUrlCtrl.text.trim());
+    final isOnline = await service.testConnection();
+    if (mounted) {
+      setState(() {
+        _isServerOnline = isOnline;
+        _isTestingConnection = false;
+      });
+    }
+  }
+
+  /// Menyimpan seluruh konfigurasi SaaS dan menyelaraskannya ke provider aktif
   Future<void> _saveConfig() async {
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
@@ -55,26 +69,23 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
     try {
       final settingsProv = context.read<SettingsProvider>();
       final cleanRestoId = _restoIdCtrl.text.trim().isEmpty ? 'default' : _restoIdCtrl.text.trim();
-      final cleanProjId = _projectIdCtrl.text.trim().isEmpty ? 'restodigital-pos' : _projectIdCtrl.text.trim();
-      final cleanApiKey = _apiKeyCtrl.text.trim();
       final cleanWebUrl = _webUrlCtrl.text.trim().replaceAll(RegExp(r'/+$'), '');
 
       await settingsProv.updateCloudConfig(
         restoId: cleanRestoId,
-        firebaseProjectId: cleanProjId,
-        firebaseApiKey: cleanApiKey,
+        firebaseProjectId: 'saas-resto',
+        firebaseApiKey: '',
         webOrderBaseUrl: cleanWebUrl,
         isCloudSyncEnabled: _isCloudSyncEnabled,
       );
 
-      // Sinkronkan ke OnlineOrderProvider agar listener langsung berganti target cloud
       if (mounted) {
         final updatedSettings = settingsProv.settings;
         context.read<OnlineOrderProvider>().syncWithSettings(updatedSettings);
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Konfigurasi Cloud & Multi-Tenant berhasil disimpan! ✅'),
+            content: Text('Konfigurasi Cloud SaaS berhasil disimpan! ✅'),
             backgroundColor: AppTheme.emeraldGreen,
             behavior: SnackBarBehavior.floating,
           ),
@@ -87,7 +98,7 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
     }
   }
 
-  /// Menguji koneksi cloud dengan menyinkronkan katalog menu resto ke Firebase
+  /// Menguji koneksi cloud dengan menyinkronkan katalog menu resto ke server SaaS
   Future<void> _testSyncMenu() async {
     FocusScope.of(context).unfocus();
     setState(() => _isTestingSync = true);
@@ -97,31 +108,35 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
       final online = context.read<OnlineOrderProvider>();
       final settingsProv = context.read<SettingsProvider>();
 
-      // Pastikan service memakai konfigurasi terbaru dari form
       online.syncWithSettings(settingsProv.settings.copyWith(
         restoId: _restoIdCtrl.text.trim(),
-        firebaseProjectId: _projectIdCtrl.text.trim(),
-        firebaseApiKey: _apiKeyCtrl.text.trim(),
         webOrderBaseUrl: _webUrlCtrl.text.trim(),
         isCloudSyncEnabled: _isCloudSyncEnabled,
       ));
 
-      final success = await online.syncMenuCatalog(pos.products);
+      final categoryMap = {
+        for (final c in pos.categories) c.id: c.name,
+      };
+
+      final success = await online.syncMenuCatalog(
+        pos.products,
+        categoryNames: categoryMap,
+      );
 
       if (mounted) {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Koneksi berhasil! ${pos.products.length} menu sukses tersinkron ke cloud. 🚀'),
+              content: Text('Koneksi berhasil! ${pos.products.length} menu sukses tersinkronkan ke server SaaS. 🚀'),
               backgroundColor: AppTheme.emeraldGreen,
               behavior: SnackBarBehavior.floating,
             ),
           );
         } else {
-          final err = online.syncError ?? 'Periksa kembali Project ID dan API Key Anda.';
+          final err = online.syncError ?? 'Periksa koneksi server SaaS Anda.';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Gagal sinkron ke cloud: $err ⚠️'),
+              content: Text('Gagal sinkron ke server: $err ⚠️'),
               backgroundColor: AppTheme.dangerRed,
               behavior: SnackBarBehavior.floating,
             ),
@@ -135,39 +150,6 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
     }
   }
 
-  /// Mengembalikan nilai konfigurasi ke bawaan pabrik (Default Starter)
-  void _resetToDefault() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Reset Pengaturan Cloud?'),
-        content: const Text(
-          'Konfigurasi akan dikembalikan ke Firebase bawaan proyek (restodigital-pos) dengan Resto ID "default".',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _restoIdCtrl.text = 'default';
-                _projectIdCtrl.text = 'restodigital-pos';
-                _apiKeyCtrl.text = 'AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w';
-                _webUrlCtrl.text = 'https://restodigital-pos.web.app';
-                _isCloudSyncEnabled = true;
-              });
-              Navigator.pop(ctx);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dangerRed, foregroundColor: Colors.white),
-            child: const Text('Reset'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -179,7 +161,7 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
     return Scaffold(
       backgroundColor: isDark ? AppTheme.darkScaffold : AppTheme.lightScaffold,
       appBar: AppBar(
-        title: const Text('Integrasi Cloud & Multi-Tenant', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        title: const Text('Integrasi Cloud SaaS Resto', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -210,30 +192,66 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Banner Edukasi Multi-Tenant
+                  // Banner Status Server SaaS
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0284C7).withValues(alpha: isDark ? 0.15 : 0.08),
+                      color: (_isServerOnline == true ? AppTheme.emeraldGreen : const Color(0xFF0284C7))
+                          .withValues(alpha: isDark ? 0.15 : 0.08),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: (_isServerOnline == true ? AppTheme.emeraldGreen : const Color(0xFF0284C7))
+                            .withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.shield_outlined, color: Color(0xFF0284C7), size: 28),
+                        Icon(
+                          _isServerOnline == true ? Icons.cloud_done_rounded : Icons.cloud_queue_rounded,
+                          color: _isServerOnline == true ? AppTheme.emeraldGreen : const Color(0xFF0284C7),
+                          size: 32,
+                        ),
                         const SizedBox(width: 14),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'Isolasi Data Antar Restoran (Multi-Tenant)',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: textColor),
+                              Row(
+                                children: [
+                                  Text(
+                                    'Server Backend SaaS Mandiri',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: textColor),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  if (_isTestingConnection)
+                                    const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
+                                  else
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: (_isServerOnline == true ? AppTheme.emeraldGreen : Colors.orange)
+                                            .withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: (_isServerOnline == true ? AppTheme.emeraldGreen : Colors.orange)
+                                              .withValues(alpha: 0.4),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        _isServerOnline == true ? 'ONLINE' : 'CEK KONEKSI',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: _isServerOnline == true ? AppTheme.emeraldGreen : Colors.orange,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Resto ID menjamin pesanan meja, katalog menu, dan panggilan pelayan tidak tertukar dengan restoran lain meskipun menggunakan database cloud yang sama.',
+                                'Aplikasi kasir terhubung langsung ke server cloud Anda di https://resto-api.ipankhub.web.id tanpa ketergantungan pihak ketiga.',
                                 style: TextStyle(fontSize: 12, color: textMuted),
                               ),
                             ],
@@ -255,11 +273,11 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                       border: Border.all(color: borderColor),
                     ),
                     child: SwitchListTile.adaptive(
-                      title: const Text('Aktifkan Sinkronisasi Cloud', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+                      title: const Text('Aktifkan Sinkronisasi Pesanan Meja', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
                       subtitle: Text(
                         _isCloudSyncEnabled
-                            ? 'Aplikasi aktif menerima pesanan mandiri tamu meja secara online.'
-                            : 'Mode Offline Saja: Kasir hanya beroperasi lokal tanpa web order.',
+                            ? 'Aplikasi kasir aktif menerima pesanan mandiri tamu meja secara real-time.'
+                            : 'Mode Offline: Kasir hanya beroperasi lokal tanpa web self-ordering.',
                         style: TextStyle(fontSize: 11.5, color: textMuted),
                       ),
                       value: _isCloudSyncEnabled,
@@ -270,8 +288,8 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
 
                   const SizedBox(height: 20),
 
-                  // KARTU 2: IDENTITAS TENANT & OUTLET RESTO
-                  _buildSectionHeader('IDENTITAS RESTO (TENANT ID)', textColor),
+                  // KARTU 2: IDENTITAS RESTO & DOMAIN SELF-ORDERING
+                  _buildSectionHeader('IDENTITAS OUTLET & WEB ORDERING MEJA', textColor),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -287,9 +305,9 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                           controller: _restoIdCtrl,
                           decoration: InputDecoration(
                             labelText: 'Resto / Tenant ID',
-                            hintText: 'Contoh: warkop_berkah_01 atau default',
+                            hintText: 'default atau nama_cabang',
                             prefixIcon: const Icon(Icons.store_rounded),
-                            helperText: 'Gunakan huruf kecil tanpa spasi. Ini adalah namespace unik outlet Anda.',
+                            helperText: 'ID unik cabang/outlet restoran Anda (gunakan huruf kecil tanpa spasi).',
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
@@ -297,10 +315,25 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                         TextField(
                           controller: _webUrlCtrl,
                           decoration: InputDecoration(
-                            labelText: 'Domain URL Web Self-Ordering',
-                            hintText: 'https://restodigital-pos.web.app',
+                            labelText: 'Domain URL Web Self-Ordering Meja',
+                            hintText: 'https://order.ipankhub.web.id',
                             prefixIcon: const Icon(Icons.language_rounded),
-                            helperText: 'Alamat web yang dibuka tamu saat memindai kode QR meja.',
+                            helperText: 'Alamat web menu yang dibuka tamu saat memindai kode QR meja.',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _serverUrlCtrl,
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Endpoint API Server SaaS',
+                            prefixIcon: const Icon(Icons.dns_rounded),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.refresh_rounded),
+                              tooltip: 'Uji Koneksi Server',
+                              onPressed: _checkServerHealth,
+                            ),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
@@ -310,8 +343,8 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
 
                   const SizedBox(height: 20),
 
-                  // KARTU 3: KONEKSI DATABASE FIREBASE CLOUD
-                  _buildSectionHeader('FIREBASE CLOUD FIRESTORE', textColor),
+                  // KARTU 3: AKSI SINKRONISASI KATALOG MENU
+                  _buildSectionHeader('SINKRONISASI KATALOG MENU KE CLOUD', textColor),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -323,60 +356,26 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextField(
-                          controller: _projectIdCtrl,
-                          decoration: InputDecoration(
-                            labelText: 'Firebase Project ID',
-                            hintText: 'restodigital-pos',
-                            prefixIcon: const Icon(Icons.cloud_rounded),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
+                        Text(
+                          'Unggah seluruh daftar kategori dan produk kasir ke server SaaS agar menu makanan dan minuman pada Web QR Meja selalu terbarui secara instan.',
+                          style: TextStyle(fontSize: 12, color: textMuted),
                         ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _apiKeyCtrl,
-                          obscureText: _obscureApiKey,
-                          decoration: InputDecoration(
-                            labelText: 'Firebase Web API Key',
-                            hintText: 'AIzaSy...',
-                            prefixIcon: const Icon(Icons.vpn_key_rounded),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscureApiKey ? Icons.visibility_off : Icons.visibility),
-                              onPressed: () => setState(() => _obscureApiKey = !_obscureApiKey),
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: _isTestingSync ? null : _testSyncMenu,
+                            icon: _isTestingSync
+                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                : const Icon(Icons.cloud_upload_rounded),
+                            label: Text(_isTestingSync ? 'Menyinkronkan...' : 'Sinkronkan Menu ke Server SaaS'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.emeraldGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: _isTestingSync ? null : _testSyncMenu,
-                                icon: _isTestingSync
-                                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                                    : const Icon(Icons.sync_rounded, size: 16),
-                                label: Text(
-                                  _isTestingSync ? 'Menguji...' : 'Uji Koneksi & Sinkronkan Menu',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            IconButton(
-                              icon: const Icon(Icons.restore_rounded),
-                              tooltip: 'Reset ke Default',
-                              onPressed: _resetToDefault,
-                              style: IconButton.styleFrom(
-                                side: BorderSide(color: borderColor),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                            ),
-                          ],
                         ),
                       ],
                     ),
@@ -392,14 +391,14 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
     );
   }
 
-  Widget _buildSectionHeader(String title, Color textColor) {
+  Widget _buildSectionHeader(String title, Color color) {
     return Text(
       title,
       style: TextStyle(
-        fontSize: 11.5,
+        fontSize: 11,
         fontWeight: FontWeight.w800,
         letterSpacing: 0.8,
-        color: textColor.withValues(alpha: 0.7),
+        color: color.withValues(alpha: 0.7),
       ),
     );
   }

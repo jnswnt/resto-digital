@@ -1,48 +1,22 @@
 /**
  * ============================================================================
- * Resto Digital - Web Self-Ordering Meja Resto
+ * Resto Digital - Web Self-Ordering Meja Resto (SaaS Engine)
  * 
- * Logika Utama & Fitur Unggulan:
- * 1. Inisialisasi Firebase Firestore SDK (Project: restodigital-pos)
- * 2. Deteksi Nomor Meja dari URL (?table=03) & LocalStorage
- * 3. Sinkronisasi Menu Realtime dari Firestore (Dukungan Sold Out / Menu Habis)
- * 4. Keranjang Belanja & Kustomisasi Rasa/Catatan Khusus (Modifiers)
- * 5. Panggil Bantuan Pelayan (Call Waiter) -> Firestore `table_calls`
- * 6. Pembayaran Mandiri QRIS Dinamis (Auto-Nominal CRC16 EMVCo di Web)
- * 7. Audio Alert Chime (Web Audio API) untuk notifikasi makanan siap
- * 8. Pelacak Status Realtime:
- *    [Menunggu Konfirmasi] -> [Diproses] -> [Disajikan / Selesai]
+ * Arsitektur:
+ * 1. Terhubung langsung ke Backend SaaS REST API & WebSocket Hub (https://resto-api.ipankhub.web.id)
+ * 2. Multi-Tenant: Terisolasi otomatis per `restoId`
+ * 3. Deteksi Meja dari URL (?table=04)
+ * 4. Panggilan Pelayan Realtime (Call Waiter)
+ * 5. Pelacakan Status Pesanan Realtime (Socket.IO + REST Polling)
+ * 6. Bebas Vendor Cloud Pihak Ketiga (100% Self-Hosted di VPS Tencent aaPanel)
  * ============================================================================
  */
-
-// 1. KONFIGURASI FIREBASE PROJECT
-const firebaseConfig = {
-  apiKey: "AIzaSyBL9UgLYEtq32Upsp38Xa_C_Vt2Fgzwy6w",
-  authDomain: "restodigital-pos.firebaseapp.com",
-  projectId: "restodigital-pos",
-  storageBucket: "restodigital-pos.firebasestorage.app",
-  messagingSenderId: "59601017378",
-  appId: "1:59601017378:web:d90e0e8fd82d957016087b"
-};
-
-// Inisialisasi Firebase & Firestore
-let db = null;
-try {
-  if (typeof firebase !== 'undefined') {
-    firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
-  }
-} catch (err) {
-  console.warn("Firestore inisialisasi tertunda / mode fallback:", err);
-}
 
 // 1.0 KONFIGURASI SAAS BACKEND PROXY (RESTO-API)
 const SAAS_BACKEND_API = "https://resto-api.ipankhub.web.id";
 let socketClient = null;
 
 // 1.1 DETEKSI RESTO ID (MULTI-TENANT ISOLATION)
-// Membaca ID Resto dari query URL (?resto=...) atau LocalStorage agar data menu dan pesanan
-// terpisah antar restoran meskipun menggunakan domain/proyek web order yang sama.
 const urlParamsGlobal = new URLSearchParams(window.location.search);
 let currentRestoId = (urlParamsGlobal.get("resto") || urlParamsGlobal.get("r") || localStorage.getItem("pos_resto_id") || "default").trim();
 if (urlParamsGlobal.get("resto") || urlParamsGlobal.get("r")) {
@@ -68,23 +42,15 @@ try {
         }
       }
     });
+    socketClient.on('catalog_updated', () => {
+      console.log('[SaaS Socket] Katalog diperbarui oleh kasir');
+      if (typeof loadMenuAndConfigFromBackend === 'function') {
+        loadMenuAndConfigFromBackend();
+      }
+    });
   }
 } catch (err) {
   console.warn('[SaaS Socket] Inisialisasi socket offline/tertunda:', err);
-}
-
-/**
- * Mengembalikan objek Firestore CollectionReference sesuai tenant resto aktif.
- * Jika currentRestoId bukan 'default', data diarahkan ke subkoleksi /restos/{restoId}/{collectionName}
- */
-function getRestoCollection(collectionName) {
-  if (db) {
-    if (currentRestoId && currentRestoId !== "default") {
-      return db.collection("restos").doc(currentRestoId).collection(collectionName);
-    }
-    return db.collection(collectionName);
-  }
-  return null;
 }
 
 // 2. STARTER MENU FALLBACK DENGAN FIELD KETERSEDIAAN (isAvailable)
@@ -472,7 +438,7 @@ function updateActiveOrderTrackerUI() {
 document.addEventListener("DOMContentLoaded", () => {
   setupTableNumber();
   setupEventListeners();
-  loadMenuAndConfigFromFirestore();
+  loadMenuAndConfigFromBackend();
   checkExistingActiveOrder();
 });
 
@@ -639,9 +605,9 @@ function clearTableSession(targetTable = tableNumber) {
     cart = [];
     updateFloatingCartBar();
 
-    if (orderTrackerUnsubscribe) {
-      orderTrackerUnsubscribe();
-      orderTrackerUnsubscribe = null;
+    if (orderTrackerTimer) {
+      clearInterval(orderTrackerTimer);
+      orderTrackerTimer = null;
     }
     if (trackerModalEl) trackerModalEl.style.display = "none";
     updateActiveOrderTrackerUI();
@@ -663,61 +629,39 @@ function updateTableDisplay() {
   trackerTablePillEl.textContent = label;
 }
 
-// 8. MEMUAT MENU & PENGATURAN TOKO DARI FIRESTORE
-async function loadMenuAndConfigFromFirestore() {
+// 8. MEMUAT MENU & PENGATURAN TOKO DARI SAAS BACKEND PROXY (RESTO-API)
+async function loadMenuAndConfigFromBackend() {
   renderCategoryChips();
   renderMenu();
 
-  if (!db) return;
-
   try {
-    // Ambil menu resto realtime
-    const menuCol = getRestoCollection("resto_menu");
-    if (menuCol) {
-      menuCol.onSnapshot(snapshot => {
-        if (!snapshot.empty) {
-          const items = [];
-          snapshot.forEach(doc => {
-            const d = doc.data();
-            // Gunakan formatCategoryName agar ID teknis seperti cat_makanan otomatis menjadi nama ramah (Makanan Utama)
-            const rawCat = d.categoryName || d.category || d.categoryId || "Makanan Utama";
-            items.push({
-              id: doc.id,
-              name: d.name,
-              price: d.price || d.sellPrice || 0,
-              category: formatCategoryName(rawCat),
-              description: d.description || "Menu lezat pilihan resto kami.",
-              icon: d.icon || "🍽️",
-              imageUrl: d.imageUrl,
-              isAvailable: d.isAvailable !== undefined ? d.isAvailable : true,
-              isSpicy: d.isSpicy || false,
-              isBestSeller: d.isBestSeller || false,
-              isRecommended: d.isRecommended || false
-            });
-          });
-          menuCatalog = items;
-          renderCategoryChips();
-          renderMenu();
-        }
-      }, err => console.warn("Listener menu realtime:", err));
-    }
-
-    // Hubungkan konfigurasi QRIS toko & profil resto secara realtime dari Cloud Firestore
-    const configCol = getRestoCollection("resto_config");
-    if (configCol) {
-      configCol.doc("settings").onSnapshot((doc) => {
-        if (doc.exists) {
-          const data = doc.data();
-          if (data.qrisPayload && data.qrisPayload.trim().length > 10) {
-            currentStoreQrisPayload = data.qrisPayload.trim();
-            console.log("Konfigurasi QRIS toko terhubung realtime dari kasir:", currentStoreQrisPayload.slice(0, 30) + "...");
-          }
-          if (data.storeName) storeNameEl.textContent = data.storeName;
-        }
-      }, err => console.warn("Listener konfigurasi QRIS realtime:", err));
+    const res = await fetch(`${SAAS_BACKEND_API}/api/catalog/${currentRestoId}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.restoName && storeNameEl) {
+        storeNameEl.textContent = data.restoName;
+      }
+      if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+        menuCatalog = data.products.map(p => ({
+          id: p.id,
+          name: p.name,
+          price: Number(p.price || p.sellPrice || 0),
+          category: formatCategoryName(p.category || p.categoryName || "Makanan Utama"),
+          description: p.description || "Menu lezat pilihan resto kami.",
+          icon: p.icon || "🍽️",
+          imageUrl: p.imageUrl || "",
+          isAvailable: p.isAvailable !== false,
+          isSpicy: p.isSpicy || false,
+          isBestSeller: p.isBestSeller || false,
+          isRecommended: p.isRecommended || false,
+        }));
+        renderCategoryChips();
+        renderMenu();
+        console.log(`[SaaS API] Berhasil memuat ${menuCatalog.length} produk dari backend.`);
+      }
     }
   } catch (err) {
-    console.warn("Menggunakan katalog menu default:", err.message);
+    console.warn("Menggunakan katalog menu starter lokal:", err);
   }
 }
 
@@ -1393,61 +1337,60 @@ function startOrderTracking(orderId, initialData) {
   // Sembunyikan floating bar saat modal tracker aktif
   if (activeOrderFloatingBarEl) activeOrderFloatingBarEl.style.display = "none";
 
-  if (orderTrackerUnsubscribe) {
-    orderTrackerUnsubscribe();
-    orderTrackerUnsubscribe = null;
-  }
+  // Mulai pelacakan status pesanan secara berkala dari backend SaaS
+  pollOrderStatus(orderId);
+}
 
-  if (db) {
-    const ordersCol = getRestoCollection("table_orders");
-    if (ordersCol) {
-      orderTrackerUnsubscribe = ordersCol.doc(orderId)
-        .onSnapshot((doc) => {
-        if (doc.exists) {
-          const updated = doc.data();
-          
-          // Jika pesanan telah dilunasi di kasir, tampilkan struk pembayaran digital
-          if (updated.status === "paid") {
-            if (orderTrackerUnsubscribe) {
-              orderTrackerUnsubscribe();
-              orderTrackerUnsubscribe = null;
-            }
-            if (trackerModalEl) trackerModalEl.style.display = "none";
-            playAudioChime("orderReady");
-            showPaymentSuccessReceipt(updated);
-            return;
-          }
+let orderTrackerTimer = null;
 
-          // Jika pesanan dibatalkan oleh kasir, kosongkan sesi meja
-          if (updated.status === "cancelled") {
-            clearTableSession(tableNumber);
-            return;
-          }
+function pollOrderStatus(orderId) {
+  if (orderTrackerTimer) clearInterval(orderTrackerTimer);
+  const checkStatus = async () => {
+    try {
+      const res = await fetch(`${SAAS_BACKEND_API}/api/orders/${currentRestoId}/${orderId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const updated = data.order;
+        if (!updated) return;
 
-          // Simpan pembaruan status ke rounds
-          saveTableRound(updated);
-
-          // Audio Alert jika status berubah menjadi Disajikan / Selesai!
-          if ((updated.status === "completed" || updated.status === "served") && lastKnownOrderStatus !== "completed") {
-            playAudioChime("orderReady");
-          }
-          lastKnownOrderStatus = updated.status;
-
-          updateTrackerVisuals(updated.status);
-          updateCookingTimer(updated.status, updated.createdAt);
-          if (updated.items) {
-            renderTrackerSummary(updated);
-          }
-          updateActiveOrderTrackerUI();
-        } else {
-          // Dokumen pesanan telah dihapus/dibersihkan oleh kasir saat meja dikosongkan
-          clearTableSession(tableNumber);
+        // Jika pesanan telah dilunasi di kasir, tampilkan struk pembayaran digital
+        if (updated.status === "paid") {
+          if (orderTrackerTimer) clearInterval(orderTrackerTimer);
+          if (trackerModalEl) trackerModalEl.style.display = "none";
+          playAudioChime("orderReady");
+          showPaymentSuccessReceipt(updated);
+          return;
         }
-      }, (err) => {
-        console.warn("Listener status pesanan:", err);
-      });
+
+        // Jika pesanan dibatalkan oleh kasir, kosongkan sesi meja
+        if (updated.status === "cancelled") {
+          if (orderTrackerTimer) clearInterval(orderTrackerTimer);
+          clearTableSession(tableNumber);
+          return;
+        }
+
+        // Simpan pembaruan status ke rounds
+        saveTableRound(updated);
+
+        // Audio Alert jika status berubah menjadi Disajikan / Selesai!
+        if ((updated.status === "completed" || updated.status === "served") && lastKnownOrderStatus !== "completed") {
+          playAudioChime("orderReady");
+        }
+        lastKnownOrderStatus = updated.status;
+
+        updateTrackerVisuals(updated.status);
+        updateCookingTimer(updated.status, updated.createdAt);
+        if (updated.items) {
+          renderTrackerSummary(updated);
+        }
+        updateActiveOrderTrackerUI();
+      }
+    } catch (err) {
+      console.warn("Polling status pesanan error:", err);
     }
-  }
+  };
+  checkStatus();
+  orderTrackerTimer = setInterval(checkStatus, 3500);
 }
 
 function updateTrackerVisuals(status) {
@@ -1588,38 +1531,8 @@ function checkExistingActiveOrder() {
       return;
     }
 
-    // Jalankan listener Firestore di latar belakang dan perbarui UI tracker button
-    if (db) {
-      const ordersCol = getRestoCollection("table_orders");
-      if (ordersCol) {
-        orderTrackerUnsubscribe = ordersCol.doc(activeOrderId)
-          .onSnapshot((doc) => {
-          if (doc.exists) {
-            const updated = doc.data();
-            if (updated.tableNo && updated.tableNo !== tableNumber) {
-              return;
-            }
-            if (updated.status === "paid") {
-              if (orderTrackerUnsubscribe) {
-                orderTrackerUnsubscribe();
-                orderTrackerUnsubscribe = null;
-              }
-              if (trackerModalEl) trackerModalEl.style.display = "none";
-              playAudioChime("orderReady");
-              showPaymentSuccessReceipt(updated);
-              return;
-            }
-            if (updated.status === "cancelled") {
-              clearTableSession(tableNumber);
-              return;
-            }
-            saveTableRound(updated);
-            lastKnownOrderStatus = updated.status;
-            updateActiveOrderTrackerUI();
-          }
-        }, (err) => console.warn("Background order listener:", err));
-      }
-    }
+    // Jalankan pelacakan status pesanan aktif dari backend SaaS
+    pollOrderStatus(activeOrderId);
     updateActiveOrderTrackerUI();
   }
 }
