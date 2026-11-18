@@ -12,6 +12,7 @@ import '../models/settings_model.dart';
 import 'auth_service.dart';
 import 'database_helper.dart';
 import 'database_migration_service.dart';
+import 'onboarding_template_service.dart';
 
 /// Layanan Penyimpanan Data Lokal (Hybrid Persistence: SharedPreferences + SQLite).
 /// - SharedPreferences: Menyimpan data kredensial & preferensi ringan (Users, Settings, ActiveShiftId).
@@ -124,6 +125,7 @@ class StorageService {
         receiptFooter: 'Terima kasih atas kunjungannya di Resto Digital! Selamat menikmati.',
         ownerPinHash: AuthService.hashPin('9999', ownerSalt),
         ownerSalt: ownerSalt,
+        isOnboarded: false, // Menandakan bahwa instalasi baru membutuhkan onboarding tenant
       );
       await saveSettings(settings);
     }
@@ -427,5 +429,94 @@ class StorageService {
   Future<void> insertCashMovement(CashMovementModel movement) async {
     _cachedCashMovements.insert(0, movement);
     await _dbHelper.insertCashMovement(movement);
+  }
+
+  // --- SaaS Onboarding & Multi-Tenant Setup ---
+
+  /// Melakukan setup awal untuk tenant kafe/resto baru saat onboarding wizard
+  Future<void> setupNewTenant({
+    required String storeName,
+    required String restoId,
+    required String businessType,
+    required String address,
+    required String phoneWA,
+    required String ownerName,
+    required String ownerPin,
+    required String cashierName,
+    required String cashierPin,
+    required TemplateBusinessType templateType,
+  }) async {
+    // 1. Buat Akun Owner Baru
+    final ownerSalt = AuthService.generateSalt();
+    final ownerUser = UserModel(
+      id: 'user_owner',
+      name: '$ownerName (Owner)',
+      role: 'owner',
+      pinHash: AuthService.hashPin(ownerPin, ownerSalt),
+      salt: ownerSalt,
+      isActive: true,
+    );
+
+    // 2. Buat Akun Kasir Pertama
+    final cashierSalt = AuthService.generateSalt();
+    final cashierUser = UserModel(
+      id: 'user_cashier_1',
+      name: '$cashierName (Kasir)',
+      role: 'cashier',
+      pinHash: AuthService.hashPin(cashierPin, cashierSalt),
+      salt: cashierSalt,
+      isActive: true,
+    );
+
+    // 3. Buat Akun Dapur (KDS)
+    final kitchenSalt = AuthService.generateSalt();
+    final kitchenUser = UserModel(
+      id: 'user_kitchen',
+      name: 'Koki Dapur',
+      role: 'kitchen',
+      pinHash: AuthService.hashPin(cashierPin, kitchenSalt),
+      salt: kitchenSalt,
+      isActive: true,
+    );
+
+    await saveUsers([ownerUser, cashierUser, kitchenUser]);
+
+    // 4. Hitung masa trial 14 hari
+    final trialExpiry = DateTime.now().add(const Duration(days: 14)).toIso8601String();
+
+    // 5. Simpan pengaturan resto baru
+    final currentSettings = getSettings();
+    final newSettings = currentSettings.copyWith(
+      storeName: storeName,
+      restoId: restoId,
+      address: address,
+      phoneWA: phoneWA,
+      tableFeatureEnabled: true,
+      receiptFooter: 'Terima kasih atas kunjungannya di $storeName!',
+      ownerPinHash: AuthService.hashPin(ownerPin, ownerSalt),
+      ownerSalt: ownerSalt,
+      isOnboarded: true,
+      subscriptionStatus: 'trial',
+      trialExpiresAt: trialExpiry,
+      businessType: businessType,
+    );
+    await saveSettings(newSettings);
+
+    // 6. Pasang template menu yang dipilih (atau kosong jika Blank)
+    final categories = OnboardingTemplateService.getCategories(templateType);
+    await saveCategories(categories);
+
+    final products = OnboardingTemplateService.getProducts(templateType);
+    await saveProducts(products);
+
+    // 7. Muat ulang seluruh cache dari database
+    await reloadFromDatabase();
+  }
+
+  /// Mereset status onboarding agar wizard onboarding dapat dijalankan kembali
+  Future<void> resetToOnboarding() async {
+    final current = getSettings();
+    final reset = current.copyWith(isOnboarded: false);
+    await saveSettings(reset);
   }
 }

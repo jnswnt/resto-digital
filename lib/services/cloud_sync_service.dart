@@ -57,10 +57,70 @@ class CloudSyncService {
 
   String get _safeResto => restoId.isNotEmpty ? restoId : 'default';
 
+  /// Mendaftarkan akun tenant baru ke Backend SaaS API (Masa Aktif Trial 14 Hari)
+  Future<Map<String, dynamic>?> registerTenant({
+    required String restoId,
+    required String businessName,
+    String? businessType,
+    String? ownerName,
+    String? phone,
+    String? address,
+    int trialDays = 14,
+  }) async {
+    try {
+      final registerUrl = Uri.parse('$serverUrl/api/tenants/register');
+      final cleanRestoId = restoId.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-');
+      final payload = jsonEncode({
+        'restoId': cleanRestoId,
+        'businessName': businessName.trim(),
+        'businessType': businessType ?? 'cafe',
+        'ownerName': ownerName ?? 'Pemilik Toko',
+        'phone': phone ?? '',
+        'address': address ?? '',
+        'trialDays': trialDays,
+      });
+
+      final response = await _client.post(
+        registerUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        _lastError = null;
+        return data is Map<String, dynamic> ? data : null;
+      } else {
+        _lastError = 'Gagal mendaftarkan tenant: ${response.statusCode}';
+        return null;
+      }
+    } catch (e) {
+      _lastError = 'Koneksi registrasi tenant gagal: $e';
+      debugPrint('[CloudSync] $_lastError');
+      return null;
+    }
+  }
+
+  /// Mengecek status lisensi dan sisa hari masa aktif dari Server SaaS
+  Future<Map<String, dynamic>?> checkLicense() async {
+    try {
+      final licenseUrl = Uri.parse('$serverUrl/api/tenants/$_safeResto/license');
+      final response = await _client.get(licenseUrl).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[CloudSync] Gagal cek lisensi: $e');
+      return null;
+    }
+  }
+
   /// Menyinkronkan seluruh daftar produk/menu POS kasir ke Server Backend SaaS
   Future<bool> syncMenuToCloud(
     List<ProductModel> products, {
     Map<String, String>? categoryNames,
+    String? restoName,
   }) async {
     try {
       final syncUrl = Uri.parse('$serverUrl/api/catalog/$_safeResto/sync');
@@ -87,7 +147,7 @@ class CloudSyncService {
       }).toList();
 
       final payload = jsonEncode({
-        'restoName': 'Resto Digital',
+        'restoName': restoName ?? 'Resto Digital',
         'categories': categoryList,
         'products': productList,
       });

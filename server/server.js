@@ -449,6 +449,148 @@ app.post('/api/waiter-call', (req, res) => {
 });
 
 // ============================================================================
+// MANAJEMEN REGISTRASI TENANT & LISENSI SAAS (TRIAL 14 HARI)
+// ============================================================================
+const TENANTS_FILE = path.join(DATA_DIR, 'tenants.json');
+
+/**
+ * Membaca seluruh daftar tenant terdaftar dari file JSON.
+ * @returns {Array<object>}
+ */
+function readTenants() {
+  if (!fs.existsSync(TENANTS_FILE)) {
+    return [];
+  }
+  try {
+    return JSON.parse(fs.readFileSync(TENANTS_FILE, 'utf-8'));
+  } catch (err) {
+    console.error('Gagal membaca data tenants:', err);
+    return [];
+  }
+}
+
+/**
+ * Menyimpan data tenant ke file JSON secara atomik.
+ * @param {Array<object>} tenants
+ */
+function saveTenants(tenants) {
+  fs.writeFileSync(TENANTS_FILE, JSON.stringify(tenants, null, 2), 'utf-8');
+}
+
+/**
+ * POST /api/tenants/register
+ * Pendaftaran akun tenant kafe/resto baru saat onboarding aplikasi dibuka.
+ * Mengaktifkan masa trial 14 hari secara instan.
+ */
+app.post('/api/tenants/register', (req, res) => {
+  const { restoId, businessName, businessType, ownerName, phone, address, trialDays } = req.body;
+
+  if (!restoId || !businessName) {
+    return res.status(400).json({ error: 'restoId dan businessName wajib diisi.' });
+  }
+
+  const sanitizedId = String(restoId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const tenants = readTenants();
+  const existingIndex = tenants.findIndex((t) => t.restoId === sanitizedId);
+
+  const durationDays = Number(trialDays) || 14;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+
+  const tenantData = {
+    restoId: sanitizedId,
+    businessName: String(businessName).trim(),
+    businessType: businessType || 'cafe',
+    ownerName: ownerName || 'Pemilik Toko',
+    phone: phone || '',
+    address: address || '',
+    subscriptionStatus: 'trial',
+    trialDays: durationDays,
+    createdAt: now.toISOString(),
+    trialStartedAt: now.toISOString(),
+    trialExpiresAt: expiresAt.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+
+  if (existingIndex >= 0) {
+    tenants[existingIndex] = { ...tenants[existingIndex], ...tenantData };
+  } else {
+    tenants.push(tenantData);
+  }
+  saveTenants(tenants);
+
+  // Inisialisasi profil resto di file database resto terisolasi
+  const restoData = readRestoData(sanitizedId);
+  restoData.name = tenantData.businessName;
+  restoData.ownerName = tenantData.ownerName;
+  restoData.phone = tenantData.phone;
+  restoData.address = tenantData.address;
+  saveRestoData(sanitizedId, restoData);
+
+  console.log(`[Tenant] Pendaftaran baru: ${sanitizedId} (${tenantData.businessName}) | Trial: ${durationDays} hari`);
+
+  return res.status(201).json({
+    success: true,
+    message: `Pendaftaran tenant berhasil. Masa aktif trial ${durationDays} hari telah aktif.`,
+    tenant: {
+      ...tenantData,
+      daysLeft: durationDays,
+      isExpired: false,
+      webOrderUrl: `https://order.ipankhub.web.id/?resto=${sanitizedId}`,
+    },
+  });
+});
+
+/**
+ * GET /api/tenants/:restoId/license
+ * Mengecek sisa hari trial dan status lisensi tenant.
+ */
+app.get('/api/tenants/:restoId/license', (req, res) => {
+  const { restoId } = req.params;
+  const sanitizedId = String(restoId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const tenants = readTenants();
+  const tenant = tenants.find((t) => t.restoId === sanitizedId);
+
+  if (!tenant) {
+    return res.status(404).json({
+      error: 'Tenant belum terdaftar di sistem SaaS.',
+      restoId: sanitizedId,
+      subscriptionStatus: 'unregistered',
+      isExpired: true,
+    });
+  }
+
+  const now = new Date();
+  const expiry = new Date(tenant.trialExpiresAt || now);
+  const diffMs = expiry.getTime() - now.getTime();
+  const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+  const isExpired = diffMs <= 0 && tenant.subscriptionStatus !== 'active_paid';
+
+  return res.json({
+    success: true,
+    restoId: sanitizedId,
+    businessName: tenant.businessName,
+    subscriptionStatus: isExpired ? 'expired' : tenant.subscriptionStatus,
+    trialExpiresAt: tenant.trialExpiresAt,
+    daysLeft: daysLeft,
+    isExpired: isExpired,
+  });
+});
+
+/**
+ * GET /api/tenants
+ * Mendapatkan daftar seluruh tenant terdaftar (untuk pemilik SaaS).
+ */
+app.get('/api/tenants', (req, res) => {
+  const tenants = readTenants();
+  return res.json({
+    success: true,
+    totalTenants: tenants.length,
+    tenants: tenants,
+  });
+});
+
+// ============================================================================
 // MENJALANKAN SERVER
 // ============================================================================
 server.listen(PORT, () => {

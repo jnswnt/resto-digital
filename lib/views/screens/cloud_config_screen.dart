@@ -263,6 +263,111 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
 
                   const SizedBox(height: 20),
 
+                  // KARTU LISENSI SAAS
+                  _buildSectionHeader('STATUS LISENSI SAAS (TRIAL 14 HARI)', textColor),
+                  const SizedBox(height: 8),
+                  Consumer<SettingsProvider>(
+                    builder: (context, prov, _) {
+                      final settings = prov.settings;
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: cardBg,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      settings.storeName,
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Resto ID: ${settings.restoId}',
+                                      style: TextStyle(fontSize: 12, color: textMuted),
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.emeraldGreen.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: AppTheme.emeraldGreen.withValues(alpha: 0.4)),
+                                  ),
+                                  child: Text(
+                                    'Trial: ${settings.trialDaysRemaining} Hari Tersisa',
+                                    style: const TextStyle(
+                                      color: AppTheme.emeraldGreen,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            const Divider(height: 1),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Pendaftaran Kafe / Tenant Baru',
+                                  style: TextStyle(fontSize: 12, color: textMuted),
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Setup Kafe Baru'),
+                                        content: const Text(
+                                          'Buka wizard onboarding pendaftaran kafe baru?\n'
+                                          'Aplikasi akan kembali ke tampilan setup awal.',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(ctx, false),
+                                            child: const Text('Batal'),
+                                          ),
+                                          ElevatedButton(
+                                            onPressed: () => Navigator.pop(ctx, true),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: AppTheme.primaryAmber,
+                                              foregroundColor: Colors.black,
+                                            ),
+                                            child: const Text('Buka Onboarding'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true && mounted) {
+                                      await context.read<SettingsProvider>().resetToOnboarding();
+                                      if (mounted) Navigator.pop(context);
+                                    }
+                                  },
+                                  icon: const Icon(Icons.refresh_rounded, size: 14),
+                                  label: const Text('Setup Kafe Baru', style: TextStyle(fontSize: 12)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 20),
+
                   // KARTU 1: STATUS SINKRONISASI CLOUD
                   _buildSectionHeader('STATUS CLOUD & SELF-ORDERING', textColor),
                   const SizedBox(height: 8),

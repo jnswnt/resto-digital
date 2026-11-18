@@ -40,6 +40,33 @@ class SettingsModel {
   final bool enableServiceCharge; // Saklar aktivasi Biaya Layanan / Service Charge (on/off)
   final double serviceChargePercentage; // Tarif persentase Biaya Layanan (default 5.0%)
 
+  // --- Konfigurasi SaaS Onboarding & Masa Aktif Lisensi (Trial 14 Hari) ---
+  final bool isOnboarded; // Menandakan apakah setup onboarding tenant pertama kali sudah selesai
+  final String subscriptionStatus; // 'trial', 'active', 'expired'
+  final String? trialExpiresAt; // Waktu kedaluwarsa masa trial (ISO string)
+  final String businessType; // 'cafe', 'resto', 'warung', 'other'
+
+  /// Menghitung sisa hari masa aktif trial
+  int get trialDaysRemaining {
+    if (trialExpiresAt == null || trialExpiresAt!.isEmpty) return 14;
+    try {
+      final expiry = DateTime.parse(trialExpiresAt!);
+      final diff = expiry.difference(DateTime.now()).inDays;
+      return diff < 0 ? 0 : diff;
+    } catch (_) {
+      return 14;
+    }
+  }
+
+  /// Mengecek apakah lisensi tenant saat ini aktif
+  bool get isSubscriptionActive {
+    if (subscriptionStatus == 'active') return true;
+    if (subscriptionStatus == 'trial') {
+      return trialDaysRemaining > 0;
+    }
+    return false;
+  }
+
   SettingsModel({
     this.storeName = 'Resto Digital',
     this.address = 'Jl. Kuliner No. 12, Nusantara',
@@ -76,6 +103,11 @@ class SettingsModel {
     this.taxPercentage = 10.0,
     this.enableServiceCharge = false,
     this.serviceChargePercentage = 5.0,
+    // Nilai default untuk SaaS Onboarding & Lisensi
+    this.isOnboarded = true,
+    this.subscriptionStatus = 'trial',
+    this.trialExpiresAt,
+    this.businessType = 'cafe',
   });
 
   Map<String, dynamic> toMap() {
@@ -111,6 +143,10 @@ class SettingsModel {
       'taxPercentage': taxPercentage,
       'enableServiceCharge': enableServiceCharge,
       'serviceChargePercentage': serviceChargePercentage,
+      'isOnboarded': isOnboarded,
+      'subscriptionStatus': subscriptionStatus,
+      'trialExpiresAt': trialExpiresAt,
+      'businessType': businessType,
     };
   }
 
@@ -149,6 +185,13 @@ class SettingsModel {
       taxPercentage: (map['taxPercentage'] as num?)?.toDouble() ?? 10.0,
       enableServiceCharge: map['enableServiceCharge'] ?? false,
       serviceChargePercentage: (map['serviceChargePercentage'] as num?)?.toDouble() ?? 5.0,
+      isOnboarded: map['isOnboarded'] ??
+          (map['ownerPinHash'] != null &&
+              map['ownerPinHash'].toString().isNotEmpty &&
+              map['storeName'] != null),
+      subscriptionStatus: map['subscriptionStatus'] ?? 'trial',
+      trialExpiresAt: map['trialExpiresAt'] as String?,
+      businessType: map['businessType'] ?? 'cafe',
     );
   }
 
@@ -184,6 +227,10 @@ class SettingsModel {
     double? taxPercentage,
     bool? enableServiceCharge,
     double? serviceChargePercentage,
+    bool? isOnboarded,
+    String? subscriptionStatus,
+    String? trialExpiresAt,
+    String? businessType,
   }) {
     return SettingsModel(
       storeName: storeName ?? this.storeName,
@@ -218,6 +265,10 @@ class SettingsModel {
       enableServiceCharge: enableServiceCharge ?? this.enableServiceCharge,
       serviceChargePercentage:
           serviceChargePercentage ?? this.serviceChargePercentage,
+      isOnboarded: isOnboarded ?? this.isOnboarded,
+      subscriptionStatus: subscriptionStatus ?? this.subscriptionStatus,
+      trialExpiresAt: trialExpiresAt ?? this.trialExpiresAt,
+      businessType: businessType ?? this.businessType,
     );
   }
 }

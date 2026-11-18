@@ -262,6 +262,46 @@ class _LockScreenState extends State<LockScreen> {
                           ],
                         ),
                       ),
+
+                      const SizedBox(height: 16),
+
+                      // Tombol Onboarding Tenant Baru
+                      TextButton.icon(
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Setup / Pendaftaran Kafe Baru'),
+                              content: const Text(
+                                'Buka wizard pendaftaran untuk kafe/resto baru?\n\n'
+                                'Anda dapat mengisi nama usaha, PIN owner/kasir baru, memilih template menu, dan mengaktifkan masa Trial 14 Hari.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('Batal'),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.primaryAmber,
+                                    foregroundColor: Colors.black,
+                                  ),
+                                  child: const Text('Buka Onboarding'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true && mounted) {
+                            await context.read<SettingsProvider>().resetToOnboarding();
+                          }
+                        },
+                        icon: const Icon(Icons.rocket_launch_outlined, size: 16, color: AppTheme.primaryAmber),
+                        label: const Text(
+                          'Pendaftaran Kafe Baru (Trial 14 Hari)',
+                          style: TextStyle(color: AppTheme.primaryAmber, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     ],
                   ),
                 ),

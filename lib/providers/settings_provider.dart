@@ -4,6 +4,7 @@ import '../models/settings_model.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
 import '../services/storage_service.dart';
+import '../services/onboarding_template_service.dart';
 
 /// Provider Pengaturan Sistem & Manajemen Kasir (CRUD Kasir khusus Owner).
 class SettingsProvider with ChangeNotifier {
@@ -265,5 +266,41 @@ class SettingsProvider with ChangeNotifier {
     );
     await _storageService.saveSettings(_settings);
     notifyListeners();
+  }
+
+  /// Melakukan setup tenant kafe/resto baru saat onboarding wizard
+  Future<void> setupNewTenant({
+    required String storeName,
+    required String restoId,
+    required String businessType,
+    required String address,
+    required String phoneWA,
+    required String ownerName,
+    required String ownerPin,
+    required String cashierName,
+    required String cashierPin,
+    required TemplateBusinessType templateType,
+  }) async {
+    await _storageService.setupNewTenant(
+      storeName: storeName,
+      restoId: restoId,
+      businessType: businessType,
+      address: address,
+      phoneWA: phoneWA,
+      ownerName: ownerName,
+      ownerPin: ownerPin,
+      cashierName: cashierName,
+      cashierPin: cashierPin,
+      templateType: templateType,
+    );
+    loadSettings();
+    loadUsers();
+  }
+
+  /// Mereset kembali ke mode onboarding untuk pendaftaran tenant baru
+  Future<void> resetToOnboarding() async {
+    await _storageService.resetToOnboarding();
+    loadSettings();
+    loadUsers();
   }
 }
