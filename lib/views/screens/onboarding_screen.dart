@@ -150,12 +150,43 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1. Panggil popup resmi Google Sign-In akun Google
-      final GoogleSignInAccount? account = await _googleSignIn.signIn();
+      // 1. Cek apakah sudah ada sesi Google yang aktif di browser ini (Fast Session Restore)
+      GoogleSignInAccount? account = _googleSignIn.currentUser;
+      if (account == null) {
+        try {
+          account = await _googleSignIn.signInSilently().timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => null,
+          );
+        } catch (_) {}
+      }
+
+      // 2. Jika belum ada sesi aktif, bersihkan status sesi lama & buka jendela login Google dengan timeout aman
+      if (account == null) {
+        try {
+          await _googleSignIn.signOut();
+        } catch (_) {}
+
+        account = await _googleSignIn.signIn().timeout(
+          const Duration(seconds: 25),
+          onTimeout: () {
+            debugPrint('[GoogleSignIn] Jendela login Google ditutup atau waktu habis.');
+            return null;
+          },
+        );
+      }
 
       if (account == null) {
-        // Pengguna membatalkan atau menutup jendela popup Google
-        if (mounted) setState(() => _isLoading = false);
+        // Pengguna membatalkan, menutup jendela popup Google, atau waktu habis
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Login Google dibatalkan atau waktu habis. Silakan coba klik lagi.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
         return;
       }
 
@@ -165,12 +196,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           : 'Pemilik Resto';
       final picture = account.photoUrl;
 
-      // 2. Hubungkan data akun Google ke Server Backend SaaS
+      // 3. Hubungkan data akun Google ke Server Backend SaaS
       final cloudSync = CloudSyncService(serverUrl: CloudSyncService.defaultServerUrl);
       final authRes = await cloudSync.authenticateWithGoogle(
         email: email,
         name: name,
         picture: picture,
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          debugPrint('[GoogleSignIn] Server backend timeout');
+          return null;
+        },
       );
 
       if (!mounted) return;
@@ -983,7 +1020,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             onPressed: () {
-              setState(() => _currentView = OnboardingView.welcomeGateway);
+              setState(() {
+                _isLoading = false;
+                _currentView = OnboardingView.welcomeGateway;
+              });
             },
             icon: const Icon(Icons.arrow_back_rounded, size: 16),
             label: const Text('Kembali ke Pilihan Peran'),
@@ -1067,6 +1107,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   elevation: 0,
                 ),
               ),
+
+              if (_isLoading) ...[
+                const SizedBox(height: 12),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () {
+                      setState(() => _isLoading = false);
+                    },
+                    icon: const Icon(Icons.close_rounded, size: 16, color: Colors.redAccent),
+                    label: const Text(
+                      'Batalkan & Buka Kunci Layar',
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1088,6 +1148,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         OutlinedButton.icon(
           onPressed: () {
             setState(() {
+              _isLoading = false;
               _wizardStep = 0;
               _currentView = OnboardingView.ownerNewTenant;
             });

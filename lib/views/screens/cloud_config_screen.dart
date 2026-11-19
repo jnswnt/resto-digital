@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/online_order_provider.dart';
 import '../../providers/pos_provider.dart';
@@ -335,6 +336,7 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                   onPressed: () async {
                                     final navigator = Navigator.of(context);
                                     final settingsProv = context.read<SettingsProvider>();
+                                    final authProv = context.read<AuthProvider>();
                                     final confirm = await showDialog<bool>(
                                       context: context,
                                       builder: (ctx) => AlertDialog(
@@ -360,6 +362,7 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                       ),
                                     );
                                     if (confirm == true && mounted) {
+                                      authProv.logout();
                                       await settingsProv.resetToOnboarding();
                                       navigator.pop();
                                     }
