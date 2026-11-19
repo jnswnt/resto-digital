@@ -321,7 +321,7 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  'Pendaftaran Kafe / Tenant Baru',
+                                  'Pergantian Outlet / Pendaftaran Baru',
                                   style: TextStyle(fontSize: 12, color: textMuted),
                                 ),
                                 OutlinedButton.icon(
@@ -329,10 +329,10 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                     final confirm = await showDialog<bool>(
                                       context: context,
                                       builder: (ctx) => AlertDialog(
-                                        title: const Text('Setup Kafe Baru'),
+                                        title: const Text('Lepas Tautan & Setup Kafe Baru'),
                                         content: const Text(
-                                          'Buka wizard onboarding pendaftaran kafe baru?\n'
-                                          'Aplikasi akan kembali ke tampilan setup awal.',
+                                          'Apakah Anda ingin memutuskan perangkat ini dari outlet saat ini dan membuka wizard setup awal?\n\n'
+                                          'Aplikasi akan kembali ke tampilan onboarding pendaftaran untuk mendaftarkan kafe baru atau menghubungkan ke outlet lain.',
                                         ),
                                         actions: [
                                           TextButton(
@@ -342,10 +342,10 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                           ElevatedButton(
                                             onPressed: () => Navigator.pop(ctx, true),
                                             style: ElevatedButton.styleFrom(
-                                              backgroundColor: AppTheme.primaryAmber,
-                                              foregroundColor: Colors.black,
+                                              backgroundColor: AppTheme.dangerRed,
+                                              foregroundColor: Colors.white,
                                             ),
-                                            child: const Text('Buka Onboarding'),
+                                            child: const Text('Lepas Tautan Perangkat'),
                                           ),
                                         ],
                                       ),
@@ -355,8 +355,8 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                       if (mounted) Navigator.pop(context);
                                     }
                                   },
-                                  icon: const Icon(Icons.refresh_rounded, size: 14),
-                                  label: const Text('Setup Kafe Baru', style: TextStyle(fontSize: 12)),
+                                  icon: const Icon(Icons.swap_horiz_rounded, size: 14),
+                                  label: const Text('Lepas Tautan Perangkat', style: TextStyle(fontSize: 12)),
                                 ),
                               ],
                             ),

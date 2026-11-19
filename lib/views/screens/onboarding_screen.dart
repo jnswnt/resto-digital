@@ -348,6 +348,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             ),
                         ],
                       ),
+
+                      if (_currentStep == 0) ...[
+                        const SizedBox(height: 24),
+                        const Divider(),
+                        const SizedBox(height: 12),
+                        Center(
+                          child: TextButton.icon(
+                            onPressed: _showConnectExistingDialog,
+                            icon: const Icon(Icons.link_rounded, size: 16),
+                            label: const Text(
+                              'Sudah punya outlet terdaftar? Hubungkan Resto ID di sini',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -355,6 +371,127 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Dialog untuk menautkan perangkat ke outlet yang sudah terdaftar di server
+  Future<void> _showConnectExistingDialog() async {
+    final restoIdCtrl = TextEditingController();
+    final ownerPinCtrl = TextEditingController(text: '9999');
+    bool isConnecting = false;
+    String? errorMsg;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) {
+          return AlertDialog(
+            title: Row(
+              children: const [
+                Icon(Icons.link_rounded, color: AppTheme.primaryAmber),
+                SizedBox(width: 8),
+                Text('Hubungkan ke Outlet yang Ada'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Masukkan Resto ID outlet yang sudah dibuat sebelumnya untuk menautkan perangkat ini.',
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: restoIdCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Resto ID *',
+                    hintText: 'contoh: kopi-senja',
+                    prefixIcon: Icon(Icons.storefront_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ownerPinCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'PIN Owner',
+                    hintText: '9999',
+                    prefixIcon: Icon(Icons.lock_outline),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (errorMsg != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    errorMsg!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(
+                onPressed: isConnecting
+                    ? null
+                    : () async {
+                        final rid = restoIdCtrl.text.trim().toLowerCase();
+                        if (rid.isEmpty) {
+                          setDlgState(() => errorMsg = 'Resto ID tidak boleh kosong');
+                          return;
+                        }
+
+                        setDlgState(() {
+                          isConnecting = true;
+                          errorMsg = null;
+                        });
+
+                        try {
+                          final settingsProv = context.read<SettingsProvider>();
+                          final posProv = context.read<PosProvider>();
+                          final onlineOrderProv = context.read<OnlineOrderProvider>();
+                          final authProv = context.read<AuthProvider>();
+
+                          await settingsProv.setupNewTenant(
+                            storeName: 'Restoran $rid',
+                            restoId: rid,
+                            businessType: 'cafe',
+                            address: 'Cabang Terhubung',
+                            phoneWA: '',
+                            ownerName: 'Owner',
+                            ownerPin: ownerPinCtrl.text.trim().isNotEmpty ? ownerPinCtrl.text.trim() : '9999',
+                            cashierName: 'Kasir',
+                            cashierPin: '1234',
+                            templateType: TemplateBusinessType.blank,
+                          );
+
+                          posProv.loadData();
+                          onlineOrderProv.syncWithSettings(settingsProv.settings);
+                          await authProv.loginWithPin(ownerPinCtrl.text.trim().isNotEmpty ? ownerPinCtrl.text.trim() : '9999');
+
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        } catch (e) {
+                          setDlgState(() {
+                            isConnecting = false;
+                            errorMsg = 'Gagal menghubungkan: $e';
+                          });
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryAmber,
+                  foregroundColor: Colors.black,
+                ),
+                child: Text(isConnecting ? 'Menghubungkan...' : 'Hubungkan Outlet'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

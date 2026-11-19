@@ -244,63 +244,29 @@ class _LockScreenState extends State<LockScreen> {
 
                       const SizedBox(height: 22),
 
-                      // Demo Hint Chips
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          alignment: WrapAlignment.center,
-                          children: [
-                            _buildQuickPinChip('1234 (Budi)'),
-                            _buildQuickPinChip('5678 (Siti)'),
-                            _buildQuickPinChip('9999 (Owner)'),
-                          ],
-                        ),
-                      ),
+                      // Demo Hint Chips (Akun Aktif)
+                      Consumer<SettingsProvider>(
+                        builder: (context, settingsProv, _) {
+                          final staffUsers = settingsProv.users.where((u) => u.isActive).toList();
+                          if (staffUsers.isEmpty) return const SizedBox.shrink();
 
-                      const SizedBox(height: 16),
-
-                      // Tombol Onboarding Tenant Baru
-                      TextButton.icon(
-                        onPressed: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Setup / Pendaftaran Kafe Baru'),
-                              content: const Text(
-                                'Buka wizard pendaftaran untuk kafe/resto baru?\n\n'
-                                'Anda dapat mengisi nama usaha, PIN owner/kasir baru, memilih template menu, dan mengaktifkan masa Trial 14 Hari.',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(ctx, false),
-                                  child: const Text('Batal'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(ctx, true),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryAmber,
-                                    foregroundColor: Colors.black,
-                                  ),
-                                  child: const Text('Buka Onboarding'),
-                                ),
-                              ],
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              alignment: WrapAlignment.center,
+                              children: staffUsers.take(3).map((u) {
+                                final defaultPin = u.isOwner ? '9999' : '1234';
+                                return _buildQuickPinChip('$defaultPin (${u.name.split(' ')[0]})');
+                              }).toList(),
                             ),
                           );
-                          if (confirm == true && mounted) {
-                            await context.read<SettingsProvider>().resetToOnboarding();
-                          }
                         },
-                        icon: const Icon(Icons.rocket_launch_outlined, size: 16, color: AppTheme.primaryAmber),
-                        label: const Text(
-                          'Pendaftaran Kafe Baru (Trial 14 Hari)',
-                          style: TextStyle(color: AppTheme.primaryAmber, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
                       ),
                     ],
                   ),
