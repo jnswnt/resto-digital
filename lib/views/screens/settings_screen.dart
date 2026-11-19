@@ -342,7 +342,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               const SizedBox(height: 28),
 
-              // TOMBOL AKSI BAWAH: KUNCI PENGATURAN & LOGOUT
+              // TOMBOL AKSI BAWAH: KUNCI PENGATURAN / KEMBALI KE KASIR & LOGOUT
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Row(
@@ -350,15 +350,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () {
+                          final isOwner = auth.currentUser?.isOwner ?? false;
                           auth.lockOwnerMode();
                           if (widget.onCancel != null) {
                             widget.onCancel!();
                           } else if (!widget.embedded && Navigator.canPop(context)) {
                             Navigator.pop(context);
                           }
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                isOwner
+                                    ? 'Kembali ke Dasbor Kasir POS.'
+                                    : 'Hak akses pengaturan telah dikunci kembali.',
+                              ),
+                              duration: const Duration(seconds: 1),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
                         },
-                        icon: const Icon(Icons.lock_outline_rounded, size: 16),
-                        label: const Text('Kunci Pengaturan'),
+                        icon: Icon(
+                          (auth.currentUser?.isOwner ?? false)
+                              ? Icons.storefront_rounded
+                              : Icons.lock_outline_rounded,
+                          size: 16,
+                        ),
+                        label: Text(
+                          (auth.currentUser?.isOwner ?? false)
+                              ? 'Kembali ke Kasir'
+                              : 'Kunci Pengaturan',
+                        ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: textMuted,
                           side: BorderSide(color: borderColor),

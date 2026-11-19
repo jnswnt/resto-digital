@@ -187,13 +187,19 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                       SalesAnalyticsScreen(
                         embedded: true,
                         onOpenMenuDrawer: isDesktop ? null : _openDrawer,
-                        onCancel: () => _onNavigationSelected(_previousIndex),
+                        onCancel: () {
+                          final target = (_previousIndex != 7 && _previousIndex != 8) ? _previousIndex : 0;
+                          _onNavigationSelected(target);
+                        },
                       ),
                       // 8: Pengaturan Owner
                       SettingsScreen(
                         embedded: true,
                         onOpenMenuDrawer: isDesktop ? null : _openDrawer,
-                        onCancel: () => _onNavigationSelected(_previousIndex),
+                        onCancel: () {
+                          final target = (_previousIndex != 7 && _previousIndex != 8) ? _previousIndex : 0;
+                          _onNavigationSelected(target);
+                        },
                       ),
                     ],
                   ),
