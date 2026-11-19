@@ -170,6 +170,36 @@
         return false;
       }
     };
+
+    // Deteksi frame pertama rendering Flutter untuk transisi splash screen yang halus & bebas lag
+    function dismissAppSplash() {
+      var loadingContainer = document.getElementById('loading-container');
+      if (loadingContainer && !loadingContainer.classList.contains('dismissed')) {
+        loadingContainer.classList.add('dismissed');
+        loadingContainer.style.transition = 'opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+        loadingContainer.style.opacity = '0';
+        loadingContainer.style.pointerEvents = 'none';
+        setTimeout(function() {
+          if (loadingContainer && loadingContainer.parentNode) {
+            loadingContainer.parentNode.removeChild(loadingContainer);
+          }
+        }, 400);
+      }
+    }
+
+    // Dengarkan event resmi Flutter First Frame
+    window.addEventListener('flutter-first-frame', dismissAppSplash);
+
+    // Fallback: Pantau kemunculan elemen flutter-view di DOM
+    var observer = new MutationObserver(function(mutations, obs) {
+      var fltView = document.querySelector('flutter-view, flt-glass-pane');
+      if (fltView) {
+        // Beri sedikit jeda render awal lalu hilangkan splash
+        setTimeout(dismissAppSplash, 200);
+        obs.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   </script>
 
   <script src="flutter_bootstrap.js" async></script>

@@ -61,15 +61,26 @@ class StorageService {
     return service;
   }
 
-  /// Memuat ulang seluruh in-memory cache langsung dari database SQLite
+  /// Memuat ulang seluruh in-memory cache langsung dari database (SQLite / Web LocalStorage) secara paralel
+  /// Menggunakan Future.wait untuk memangkas latensi IO dan mempercepat cold startup aplikasi.
   Future<void> reloadFromDatabase() async {
-    _cachedCategories = await _dbHelper.getCategories();
-    _cachedProducts = await _dbHelper.getProducts();
-    _cachedCustomers = await _dbHelper.getCustomers();
-    _cachedOrders = await _dbHelper.getOrders();
-    _cachedTransactions = await _dbHelper.getTransactions();
-    _cachedShifts = await _dbHelper.getShifts();
-    _cachedCashMovements = await _dbHelper.getCashMovements();
+    final results = await Future.wait([
+      _dbHelper.getCategories(),
+      _dbHelper.getProducts(),
+      _dbHelper.getCustomers(),
+      _dbHelper.getOrders(),
+      _dbHelper.getTransactions(),
+      _dbHelper.getShifts(),
+      _dbHelper.getCashMovements(),
+    ]);
+
+    _cachedCategories = results[0] as List<CategoryModel>;
+    _cachedProducts = results[1] as List<ProductModel>;
+    _cachedCustomers = results[2] as List<CustomerModel>;
+    _cachedOrders = results[3] as List<OrderModel>;
+    _cachedTransactions = results[4] as List<TransactionModel>;
+    _cachedShifts = results[5] as List<ShiftModel>;
+    _cachedCashMovements = results[6] as List<CashMovementModel>;
   }
 
   /// Memasukkan data awal jika aplikasi baru pertama kali dipasang
