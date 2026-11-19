@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prototipe Redesain Gateway POS - Resto Digital</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .fade-in { animation: fadeIn 0.25s ease-out forwards; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-amber-500 selection:text-black">
+
+  <!-- TOP BAR KONTROL PROTOTIPE -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-4 py-3">
+    <div class="max-w-4xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center font-bold text-black text-sm shadow-md shadow-amber-500/20">
+          POS
+        </div>
+        <div>
+          <h1 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Prototipe Interaktif</h1>
+          <p class="text-[11px] text-slate-400">Arsitektur Gateway & Pemisahan Layar Onboarding</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="resetFlow()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition flex items-center gap-1.5 border border-slate-700">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Reset ke Awal
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- CONTAINER UTAMA -->
+  <main class="flex-1 max-w-4xl w-full mx-auto p-4 md:p-6 flex flex-col justify-center">
+
+    <!-- ============================================================== -->
+    <!-- SCREEN 1: WELCOME GATEWAY (PILIHAN PERAN PERANGKAT)             -->
+    <!-- ============================================================== -->
+    <div id="screen-welcome" class="fade-in max-w-xl mx-auto w-full">
+      <div class="text-center mb-8">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-3">
+          ✨ Selamat Datang di Resto Digital POS
+        </div>
+        <h2 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">Siapakah Pengguna Perangkat Ini?</h2>
+        <p class="text-sm text-slate-400 mt-2 max-w-md mx-auto">
+          Pilih peran untuk mengonfigurasi perangkat ini secara otomatis dan tanpa formulir yang membingungkan.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- KARTU 1: SAYA PEMILIK RESTO (OWNER) -->
+        <button onclick="goToScreen('screen-owner')" class="group text-left p-6 rounded-2xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 hover:bg-slate-850 hover:shadow-xl hover:shadow-amber-500/5 transition-all duration-200 flex flex-col justify-between relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-bl-full pointer-events-none group-hover:bg-amber-500/10 transition"></div>
+          <div>
+            <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition">
+              👑
+            </div>
+            <div class="inline-block px-2.5 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 mb-2">
+              Pemilik Resto (Owner)
+            </div>
+            <h3 class="text-lg font-bold text-white group-hover:text-amber-400 transition">Saya Pemilik Usaha</h3>
+            <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+              Login dengan Google untuk hubungkan outlet yang sudah ada, atau buat restoran baru dengan Trial 14 Hari.
+            </p>
+          </div>
+          <div class="mt-6 flex items-center text-xs font-bold text-amber-400 gap-1.5 group-hover:translate-x-1 transition">
+            <span>Masuk Mode Owner</span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </div>
+        </button>
+
+        <!-- KARTU 2: SAYA KARYAWAN (KASIR / DAPUR) -->
+        <button onclick="goToScreen('screen-staff-1')" class="group text-left p-6 rounded-2xl bg-slate-900 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-200 flex flex-col justify-between relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-bl-full pointer-events-none group-hover:bg-emerald-500/10 transition"></div>
+          <div>
+            <div class="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition">
+              👨‍🍳
+            </div>
+            <div class="inline-block px-2.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 mb-2">
+              Kasir / Koki Dapur
+            </div>
+            <h3 class="text-lg font-bold text-white group-hover:text-emerald-400 transition">Saya Karyawan Toko</h3>
+            <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+              Tautkan HP atau tablet ini langsung ke toko menggunakan Scan QR Kasir atau Resto ID & PIN pribadi.
+            </p>
+          </div>
+          <div class="mt-6 flex items-center text-xs font-bold text-emerald-400 gap-1.5 group-hover:translate-x-1 transition">
+            <span>Tautkan Perangkat Ini</span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </div>
+        </button>
+      </div>
+
+      <div class="text-center mt-8 text-xs text-slate-500">
+        POS Resto Digital SaaS v1.2 • Zero Complex Configuration
+      </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SCREEN 2A: OWNER PORTAL (LOGIN GOOGLE / SETUP OUTLET)          -->
+    <!-- ============================================================== -->
+    <div id="screen-owner" class="fade-in max-w-lg mx-auto w-full hidden">
+      <button onclick="goToScreen('screen-welcome')" class="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white mb-6 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        Kembali ke Pilihan Peran
+      </button>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
+        <div class="flex items-center gap-3 mb-6">
+          <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center text-xl">
+            👑
+          </div>
+          <div>
+            <h2 class="text-xl font-bold text-white">Portal Pemilik Usaha</h2>
+            <p class="text-xs text-slate-400">Masuk untuk mengelola outlet atau buka kafe baru</p>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <!-- PILIHAN SIMULASI AKUN GOOGLE -->
+          <div class="p-4 rounded-xl bg-slate-950 border border-slate-800">
+            <label class="text-xs font-semibold text-slate-300 block mb-2">Simulasikan Skenario Akun Google:</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 cursor-pointer bg-slate-900">
+                <input type="radio" name="googleScenario" value="existing" checked class="accent-amber-500">
+                <div>
+                  <div class="font-bold text-white">Owner Samelona</div>
+                  <div class="text-[10px] text-slate-400">Punya 2 Outlet Aktif</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 cursor-pointer bg-slate-900">
+                <input type="radio" name="googleScenario" value="new" class="accent-amber-500">
+                <div>
+                  <div class="font-bold text-white">Owner Baru</div>
+                  <div class="text-[10px] text-slate-400">Belum Punya Outlet</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- TOMBOL GOOGLE LOGIN UTAMA -->
+          <button onclick="handleGoogleLoginAction()" class="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-semibold text-sm flex items-center justify-center gap-3 transition shadow-lg shadow-white/5">
+            <svg class="w-5 h-5" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span>Lanjutkan dengan Akun Google</span>
+          </button>
+
+          <div class="flex items-center gap-3 my-4">
+            <div class="flex-1 h-px bg-slate-800"></div>
+            <span class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">atau</span>
+            <div class="flex-1 h-px bg-slate-800"></div>
+          </div>
+
+          <!-- OPSI SETUP MANUAL -->
+          <button onclick="goToScreen('screen-new-tenant')" class="w-full py-3 px-4 rounded-xl border border-slate-750 hover:border-slate-600 bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white font-medium text-xs flex items-center justify-center gap-2 transition">
+            <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            Daftarkan Resto Baru Secara Manual
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SCREEN 2A-1: MULTI-OUTLET SELECTOR (UNTUK OWNER YANG SUDAH ADA)-->
+    <!-- ============================================================== -->
+    <div id="screen-outlet-selector" class="fade-in max-w-lg mx-auto w-full hidden">
+      <button onclick="goToScreen('screen-owner')" class="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white mb-6 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        Kembali ke Login Owner
+      </button>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-9 h-9 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-sm font-bold">
+            ✓
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-white">Akun Google Terhubung</h2>
+            <p class="text-xs text-slate-400" id="connected-email-label">budi.owner@samelona.com</p>
+          </div>
+        </div>
+
+        <div class="bg-slate-950 rounded-xl p-3 border border-slate-800 mt-4 mb-6">
+          <p class="text-xs text-slate-300">
+            Ditemukan <strong class="text-amber-400">2 outlet terdaftar</strong>. Pilih cabang yang ingin ditautkan ke tablet kasir ini:
+          </p>
+        </div>
+
+        <!-- DAFTAR OUTLET CABANG -->
+        <div class="space-y-3 mb-6">
+          <!-- OUTLET 1 -->
+          <div onclick="bindOutletSuccess('Toko Samelona - Cabang 1', 'samelona-1')" class="p-4 rounded-xl border border-slate-800 hover:border-amber-500/60 bg-slate-950 hover:bg-slate-850 cursor-pointer transition group">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center text-lg font-bold">
+                  ☕
+                </div>
+                <div>
+                  <h4 class="text-sm font-bold text-white group-hover:text-amber-400 transition">Toko Samelona - Cabang 1</h4>
+                  <p class="text-xs text-slate-400 mt-0.5 mono">ID: samelona-1 • Jl. Boulevard No. 12</p>
+                </div>
+              </div>
+              <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Trial Aktif (14 Hari)
+              </span>
+            </div>
+          </div>
+
+          <!-- OUTLET 2 -->
+          <div onclick="bindOutletSuccess('Toko Samelona - Cabang 2 (Pantai)', 'samelona-2')" class="p-4 rounded-xl border border-slate-800 hover:border-amber-500/60 bg-slate-950 hover:bg-slate-850 cursor-pointer transition group">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-orange-500/10 text-orange-400 flex items-center justify-center text-lg font-bold">
+                  🏖️
+                </div>
+                <div>
+                  <h4 class="text-sm font-bold text-white group-hover:text-amber-400 transition">Toko Samelona - Cabang 2</h4>
+                  <p class="text-xs text-slate-400 mt-0.5 mono">ID: samelona-2 • Kawasan Kuliner Pantai</p>
+                </div>
+              </div>
+              <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                Langganan Pro
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button onclick="goToScreen('screen-new-tenant')" class="w-full py-3 rounded-xl border border-dashed border-slate-700 hover:border-slate-500 text-xs text-slate-400 hover:text-white font-medium flex items-center justify-center gap-1.5 transition">
+          <span>+ Ingin Buka Cabang / Outlet Baru Lainnya</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SCREEN 2A-2: WIZARD SETUP RESTO BARU (OWNER BARU)              -->
+    <!-- ============================================================== -->
+    <div id="screen-new-tenant" class="fade-in max-w-xl mx-auto w-full hidden">
+      <button onclick="goToScreen('screen-owner')" class="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white mb-6 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        Batal & Kembali
+      </button>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-6">
+          <div>
+            <h2 class="text-lg font-bold text-white">Setup Outlet Baru (Trial 14 Hari)</h2>
+            <p class="text-xs text-slate-400">Lengkapi 3 langkah mudah untuk mengaktifkan POS kasir</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            Gratis 14 Hari
+          </span>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <label class="text-xs font-semibold text-slate-300 block mb-1.5">Nama Kafe / Restoran *</label>
+            <input type="text" id="setup-store-name" value="Kopi Senja Utama" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none">
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs font-semibold text-slate-300 block mb-1.5">Resto ID (Slug Unik Link Web) *</label>
+              <input type="text" value="kopi-senja-utama" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-amber-400 mono text-xs focus:border-amber-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="text-xs font-semibold text-slate-300 block mb-1.5">No WhatsApp Pemilik</label>
+              <input type="text" value="08123456789" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <div>
+              <label class="text-xs font-semibold text-slate-300 block mb-1.5">PIN Owner (4-6 Digit) *</label>
+              <input type="password" value="9999" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white mono text-sm focus:border-amber-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="text-xs font-semibold text-slate-300 block mb-1.5">PIN Kasir Pertama *</label>
+              <input type="password" value="1234" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white mono text-sm focus:border-amber-500 focus:outline-none">
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <label class="text-xs font-semibold text-slate-300 block mb-2">Pilih Katalog Menu Awal:</label>
+            <div class="grid grid-cols-3 gap-2 text-center text-xs">
+              <div class="p-3 rounded-xl border-2 border-amber-500 bg-amber-500/10 cursor-pointer font-bold text-amber-300">
+                ☕ Coffee Shop
+              </div>
+              <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-850 cursor-pointer text-slate-400">
+                🍽️ Restoran
+              </div>
+              <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-850 cursor-pointer text-slate-400">
+                ✨ Bersih (Nol)
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-4">
+            <button onclick="bindOutletSuccess(document.getElementById('setup-store-name').value, 'kopi-senja-utama')" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-bold text-sm transition shadow-lg shadow-amber-500/20">
+              🚀 Daftarkan & Mulai Trial 14 Hari
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SCREEN 2B: STAFF DEVICE PAIRING (KARYAWAN KASIR / DAPUR)       -->
+    <!-- ============================================================== -->
+    <div id="screen-staff-1" class="fade-in max-w-lg mx-auto w-full hidden">
+      <button onclick="goToScreen('screen-welcome')" class="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white mb-6 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        Kembali ke Pilihan Peran
+      </button>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
+        <div class="flex items-center gap-3 mb-6">
+          <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-xl">
+            👨‍🍳
+          </div>
+          <div>
+            <h2 class="text-xl font-bold text-white">Tautkan Perangkat Karyawan</h2>
+            <p class="text-xs text-slate-400">Hubungkan HP/tablet ke toko tempat Anda bertugas</p>
+          </div>
+        </div>
+
+        <!-- METODE 1: SCAN QR CODE DARI KASIR -->
+        <div class="p-5 rounded-2xl bg-slate-950 border border-slate-800 text-center mb-5">
+          <div class="w-12 h-12 mx-auto rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-3">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+          </div>
+          <h4 class="text-sm font-bold text-white">Pindai Kode QR Kasir</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+            Buka menu <em>Kelola Kasir</em> di tablet kasir utama, lalu arahkan kamera ke kode QR staf Anda.
+          </p>
+          <button onclick="simulateScanQR()" class="mt-4 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition inline-flex items-center gap-1.5 shadow-md shadow-emerald-500/20">
+            <span>📷 Simulasikan Scan QR Sukses</span>
+          </button>
+        </div>
+
+        <div class="flex items-center gap-3 my-4">
+          <div class="flex-1 h-px bg-slate-800"></div>
+          <span class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">atau ketik manual</span>
+          <div class="flex-1 h-px bg-slate-800"></div>
+        </div>
+
+        <!-- METODE 2: INPUT RESTO ID & USERNAME MANUAL -->
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs font-semibold text-slate-300 block mb-1">Resto ID Toko *</label>
+            <input type="text" id="input-resto-id" value="samelona" placeholder="contoh: samelona" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs mono focus:border-emerald-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-300 block mb-1">Username Karyawan Anda *</label>
+            <input type="text" id="input-username" value="lukman" placeholder="contoh: lukman" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs mono focus:border-emerald-500 focus:outline-none">
+          </div>
+          <button onclick="handleVerifyStaffStage1()" class="w-full mt-2 py-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-white font-semibold text-xs transition border border-slate-700">
+            Lanjutkan ke Verifikasi PIN →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SCREEN 2B-2: VERIFIKASI PIN KARYAWAN (TAHAP 2 PAIRING)         -->
+    <!-- ============================================================== -->
+    <div id="screen-staff-2" class="fade-in max-w-md mx-auto w-full hidden">
+      <button onclick="goToScreen('screen-staff-1')" class="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white mb-6 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        Kembali
+      </button>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl text-center">
+        <!-- KARTU PROFIL KARYAWAN TERDETEKSI -->
+        <div class="p-4 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-left flex items-center gap-3.5 mb-6">
+          <div class="w-12 h-12 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center text-2xl font-bold">
+            🍳
+          </div>
+          <div>
+            <div class="text-sm font-bold text-white" id="verified-staff-name">Lukman</div>
+            <div class="text-xs text-orange-300 font-medium" id="verified-staff-role">Koki Dapur (KDS)</div>
+            <div class="text-[11px] text-slate-400 mt-0.5" id="verified-resto-name">Toko Samelona</div>
+          </div>
+        </div>
+
+        <h3 class="text-base font-bold text-white mb-1">Masukkan PIN Keamanan Anda</h3>
+        <p class="text-xs text-slate-400 mb-6">Masukkan 4 digit PIN yang dibuatkan Owner untuk Anda</p>
+
+        <!-- DISPLAY PIN -->
+        <div class="flex justify-center gap-3 mb-6">
+          <div id="dot-0" class="w-4 h-4 rounded-full border-2 border-slate-700 bg-transparent transition"></div>
+          <div id="dot-1" class="w-4 h-4 rounded-full border-2 border-slate-700 bg-transparent transition"></div>
+          <div id="dot-2" class="w-4 h-4 rounded-full border-2 border-slate-700 bg-transparent transition"></div>
+          <div id="dot-3" class="w-4 h-4 rounded-full border-2 border-slate-700 bg-transparent transition"></div>
+        </div>
+
+        <!-- NUMPAD INTERAKTIF -->
+        <div class="grid grid-cols-3 gap-2.5 max-w-[260px] mx-auto mb-6">
+          <button onclick="pressPin('1')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">1</button>
+          <button onclick="pressPin('2')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">2</button>
+          <button onclick="pressPin('3')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">3</button>
+          <button onclick="pressPin('4')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">4</button>
+          <button onclick="pressPin('5')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">5</button>
+          <button onclick="pressPin('6')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">6</button>
+          <button onclick="pressPin('7')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">7</button>
+          <button onclick="pressPin('8')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">8</button>
+          <button onclick="pressPin('9')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">9</button>
+          <button onclick="clearPin()" class="h-12 rounded-xl bg-slate-850 hover:bg-slate-800 font-semibold text-xs text-rose-400 transition active:scale-95">Hapus</button>
+          <button onclick="pressPin('0')" class="h-12 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-base text-white transition active:scale-95">0</button>
+          <button onclick="autoFillLukmanPin()" class="h-12 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 font-semibold text-[10px] text-amber-400 transition active:scale-95">Auto (5555)</button>
+        </div>
+
+        <button onclick="submitPinPairing()" class="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition shadow-lg shadow-emerald-500/20">
+          Kunci Perangkat ke Outlet Ini
+        </button>
+      </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SCREEN 3: SUKSES PENAUTAN & SIMULASI POS KASIR                 -->
+    <!-- ============================================================== -->
+    <div id="screen-pos-success" class="fade-in max-w-xl mx-auto w-full hidden">
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl text-center">
+        <div class="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-3xl mx-auto mb-4 border border-emerald-500/20">
+          🎉
+        </div>
+        <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          Status: Perangkat Berhasil Tertaut
+        </span>
+        <h2 class="text-2xl font-extrabold text-white mt-3" id="success-resto-title">Toko Samelona</h2>
+        <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto" id="success-sub-desc">
+          Perangkat ini kini resmi terhubung ke sistem cloud. Menu dan transaksi telah tersinkronkan.
+        </p>
+
+        <!-- KARTU STATUS PERANGKAT -->
+        <div class="my-6 p-4 rounded-xl bg-slate-950 border border-slate-800 text-left grid grid-cols-2 gap-3 text-xs">
+          <div>
+            <span class="text-slate-500 block text-[10px]">MODE PERANGKAT:</span>
+            <span class="font-bold text-white text-sm" id="success-device-role">Tablet Kasir Utama (Owner)</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px]">MASA AKTIF LISENSI:</span>
+            <span class="font-bold text-emerald-400 text-sm">Trial 14 Hari Aktif</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px]">SINKRONISASI MEJA:</span>
+            <span class="font-medium text-slate-300">order.ipankhub.web.id</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px]">KEAMANAN:</span>
+            <span class="font-medium text-slate-300">Terkunci Permanen</span>
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3">
+          <button onclick="resetFlow()" class="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition border border-slate-700">
+            🔄 Coba Skenario Lain
+          </button>
+          <button onclick="alert('Ini adalah prototipe desain. Pada aplikasi Flutter asli, kasir langsung membuka transaksi!')" class="flex-1 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition shadow-md shadow-amber-500/20">
+            Buka Transaksi Kasir →
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // State Navigasi
+    let currentPin = '';
+
+    function goToScreen(screenId) {
+      const screens = [
+        'screen-welcome', 
+        'screen-owner', 
+        'screen-outlet-selector', 
+        'screen-new-tenant', 
+        'screen-staff-1', 
+        'screen-staff-2', 
+        'screen-pos-success'
+      ];
+
+      screens.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+      });
+
+      const activeEl = document.getElementById(screenId);
+      if (activeEl) {
+        activeEl.classList.remove('hidden');
+        activeEl.classList.add('fade-in');
+      }
+    }
+
+    function resetFlow() {
+      currentPin = '';
+      updatePinDots();
+      goToScreen('screen-welcome');
+    }
+
+    function handleGoogleLoginAction() {
+      const scenario = document.querySelector('input[name="googleScenario"]:checked').value;
+      if (scenario === 'existing') {
+        document.getElementById('connected-email-label').textContent = 'budi.owner@samelona.com';
+        goToScreen('screen-outlet-selector');
+      } else {
+        goToScreen('screen-new-tenant');
+      }
+    }
+
+    function bindOutletSuccess(name, id) {
+      document.getElementById('success-resto-title').textContent = name;
+      document.getElementById('success-device-role').textContent = 'Tablet Kasir POS (Owner)';
+      document.getElementById('success-sub-desc').textContent = 
+        'Perangkat ini resmi ditautkan ke outlet ID ' + id + '. Katalog 24 menu dan akun staf telah dimuat otomatis dari server SaaS.';
+      goToScreen('screen-pos-success');
+    }
+
+    function simulateScanQR() {
+      document.getElementById('verified-staff-name').textContent = 'Lukman';
+      document.getElementById('verified-staff-role').textContent = 'Koki Dapur (KDS)';
+      document.getElementById('verified-resto-name').textContent = 'Toko Samelona';
+      currentPin = '';
+      updatePinDots();
+      goToScreen('screen-staff-2');
+    }
+
+    function handleVerifyStaffStage1() {
+      const restoId = document.getElementById('input-resto-id').value.trim();
+      const username = document.getElementById('input-username').value.trim();
+      
+      if (!restoId || !username) {
+        alert('Harap isi Resto ID dan Username!');
+        return;
+      }
+
+      document.getElementById('verified-staff-name').textContent = username.toUpperCase();
+      document.getElementById('verified-staff-role').textContent = 'Karyawan (Kasir / Dapur)';
+      document.getElementById('verified-resto-name').textContent = 'Restoran ' + restoId;
+      currentPin = '';
+      updatePinDots();
+      goToScreen('screen-staff-2');
+    }
+
+    function pressPin(num) {
+      if (currentPin.length < 4) {
+        currentPin += num;
+        updatePinDots();
+      }
+      if (currentPin.length === 4) {
+        setTimeout(submitPinPairing, 200);
+      }
+    }
+
+    function clearPin() {
+      currentPin = '';
+      updatePinDots();
+    }
+
+    function autoFillLukmanPin() {
+      currentPin = '5555';
+      updatePinDots();
+      setTimeout(submitPinPairing, 300);
+    }
+
+    function updatePinDots() {
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById('dot-' + i);
+        if (dot) {
+          if (i < currentPin.length) {
+            dot.classList.add('bg-amber-400', 'border-amber-400');
+            dot.classList.remove('bg-transparent', 'border-slate-700');
+          } else {
+            dot.classList.remove('bg-amber-400', 'border-amber-400');
+            dot.classList.add('bg-transparent', 'border-slate-700');
+          }
+        }
+      }
+    }
+
+    function submitPinPairing() {
+      const staffName = document.getElementById('verified-staff-name').textContent;
+      const restoName = document.getElementById('verified-resto-name').textContent;
+      const role = document.getElementById('verified-staff-role').textContent;
+
+      document.getElementById('success-resto-title').textContent = restoName;
+      document.getElementById('success-device-role').textContent = 'HP ' + staffName + ' (' + role + ')';
+      document.getElementById('success-sub-desc').textContent = 
+        'HP ini resmi terkunci sebagai perangkat kerja ' + staffName + '. Anda tidak perlu lagi menginput Resto ID atau Scan QR di masa mendatang.';
+      goToScreen('screen-pos-success');
+    }
+  </script>
+</body>
+</html>

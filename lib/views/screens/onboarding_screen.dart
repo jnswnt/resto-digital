@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../models/category_model.dart';
 import '../../models/product_model.dart';
@@ -14,12 +13,31 @@ import '../../services/cloud_sync_service.dart';
 import '../../services/onboarding_template_service.dart';
 import '../../theme/app_theme.dart';
 
-/// Layar Onboarding & Registrasi Tenant Baru (Alur SaaS Mandiri / Self-Service).
+/// Enum tahapan navigasi layar awal (Arsitektur Gateway & Pemisahan Peran).
+/// Memisahkan portal Owner dan penautan HP Karyawan secara terpisah dan rapi.
+enum OnboardingView {
+  /// Layar Utama: Pilihan Peran Pengguna Perangkat (👑 Owner vs 👨‍🍳 Karyawan)
+  welcomeGateway,
+
+  /// Layar Owner: Pilihan Login Google, Multi-Outlet, atau Pendaftaran Baru
+  ownerHub,
+
+  /// Layar Wizard: Setup Resto Baru 3-Langkah (Identitas, PIN, Template Menu)
+  ownerNewTenant,
+
+  /// Layar Karyawan Tahap 1: Pindai QR Kasir Utama atau Input Resto ID & Username
+  staffPairingStage1,
+
+  /// Layar Karyawan Tahap 2: Tampilan Profil Terdeteksi & Numpad Verifikasi PIN
+  staffPairingStage2,
+}
+
+/// Layar Onboarding & Gateway Setup Resto Digital (Multi-Tenant SaaS).
 /// 
-/// Muncul otomatis saat aplikasi pertama kali dibuka oleh kafe/resto baru,
-/// atau saat di-reset untuk mendaftarkan outlet baru.
-/// Menyediakan pendaftaran identitas resto, akun owner/kasir, pemilihan template menu,
-/// dan aktivasi otomatis masa aktif Trial 14 Hari.
+/// Menggunakan arsitektur Gateway berbasis peran pengguna:
+/// 1. Layar Selamat Datang (Pilihan Peran: Pemilik vs Karyawan).
+/// 2. Jalur Pemilik (Owner): Login Google, pemilihan cabang terdaftar, atau setup kafe baru.
+/// 3. Jalur Karyawan: Penautan HP Kasir/Dapur via Scan QR atau Resto ID + verifikasi PIN.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
 
@@ -28,33 +46,39 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  int _currentStep = 0;
+  // State Navigasi View
+  OnboardingView _currentView = OnboardingView.welcomeGateway;
   bool _isLoading = false;
 
   // Akun Google Pemilik (Owner)
   String? _googleOwnerEmail;
   String? _googleOwnerName;
 
-  // Controllers Step 1: Identitas Kafe
+  // State Wizard Pendaftaran Resto Baru (3 Langkah)
+  int _wizardStep = 0;
   final _storeNameController = TextEditingController();
   final _restoIdController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
   String _selectedBusinessType = 'cafe'; // 'cafe', 'resto', 'warung', 'other'
 
-  // Controllers Step 2: Akun & Keamanan
   final _ownerNameController = TextEditingController(text: 'Owner');
   final _ownerPinController = TextEditingController(text: '9999');
   final _confirmOwnerPinController = TextEditingController(text: '9999');
   final _cashierNameController = TextEditingController(text: 'Kasir 1');
   final _cashierPinController = TextEditingController(text: '1234');
 
-  // Controllers Step 3: Template Menu
   TemplateBusinessType _selectedTemplate = TemplateBusinessType.coffeeShop;
 
-  // Form keys
   final _step1Key = GlobalKey<FormState>();
   final _step2Key = GlobalKey<FormState>();
+
+  // State Penautan Perangkat Karyawan (Staff Pairing)
+  final _staffRestoIdController = TextEditingController(text: 'samelona');
+  final _staffUsernameController = TextEditingController(text: 'lukman');
+  String _staffPin = '';
+  String? _staffErrorMessage;
+  Map<String, dynamic>? _verifiedStaffData;
 
   @override
   void initState() {
@@ -74,6 +98,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _confirmOwnerPinController.dispose();
     _cashierNameController.dispose();
     _cashierPinController.dispose();
+    _staffRestoIdController.dispose();
+    _staffUsernameController.dispose();
     super.dispose();
   }
 
@@ -86,307 +112,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _restoIdController.text = slug;
   }
 
-  void _nextStep() {
-    if (_currentStep == 0) {
+  void _nextWizardStep() {
+    if (_wizardStep == 0) {
       if (!_step1Key.currentState!.validate()) return;
-      setState(() => _currentStep = 1);
-    } else if (_currentStep == 1) {
+      setState(() => _wizardStep = 1);
+    } else if (_wizardStep == 1) {
       if (!_step2Key.currentState!.validate()) return;
-      setState(() => _currentStep = 2);
+      setState(() => _wizardStep = 2);
     }
   }
 
-  void _prevStep() {
-    if (_currentStep > 0) {
-      setState(() => _currentStep -= 1);
+  void _prevWizardStep() {
+    if (_wizardStep > 0) {
+      setState(() => _wizardStep -= 1);
+    } else {
+      setState(() => _currentView = OnboardingView.ownerHub);
     }
   }
 
-  /// Menyelesaikan proses onboarding & registrasi SaaS
-  Future<void> _submitRegistration() async {
-    setState(() => _isLoading = true);
-
-    final storeName = _storeNameController.text.trim();
-    final restoId = _restoIdController.text.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-');
-    final phone = _phoneController.text.trim();
-    final address = _addressController.text.trim();
-    final ownerName = _ownerNameController.text.trim();
-    final ownerPin = _ownerPinController.text.trim();
-    final cashierName = _cashierNameController.text.trim();
-    final cashierPin = _cashierPinController.text.trim();
-
-    final settingsProv = context.read<SettingsProvider>();
-    final posProv = context.read<PosProvider>();
-    final onlineOrderProv = context.read<OnlineOrderProvider>();
-    final authProv = context.read<AuthProvider>();
-
-    try {
-      // 1. Kirim registrasi ke Backend SaaS Server (Masa Trial 14 Hari)
-      final cloudSync = CloudSyncService(
-        serverUrl: CloudSyncService.defaultServerUrl,
-        restoId: restoId,
-      );
-
-      final regResult = await cloudSync.registerTenant(
-        restoId: restoId,
-        businessName: storeName,
-        businessType: _selectedBusinessType,
-        ownerName: ownerName,
-        ownerEmail: _googleOwnerEmail,
-        phone: phone,
-        address: address,
-        trialDays: 14,
-      );
-
-      if (regResult != null && regResult['success'] == true) {
-        debugPrint('[Onboarding] Pendaftaran berhasil di SaaS cloud: $restoId');
-      } else {
-        debugPrint('[Onboarding] Pendaftaran lokal aktif (mode offline fallback/cloud pending)');
-      }
-
-      // 2. Simpan seluruh konfigurasi akun & katalog template ke penyimpanan lokal
-      await settingsProv.setupNewTenant(
-        storeName: storeName,
-        restoId: restoId,
-        businessType: _selectedBusinessType,
-        address: address.isNotEmpty ? address : 'Jl. Utama No. 01',
-        phoneWA: phone.isNotEmpty ? phone : '081234567890',
-        ownerName: ownerName.isNotEmpty ? ownerName : 'Owner',
-        ownerPin: ownerPin.isNotEmpty ? ownerPin : '9999',
-        cashierName: cashierName.isNotEmpty ? cashierName : 'Kasir 1',
-        cashierPin: cashierPin.isNotEmpty ? cashierPin : '1234',
-        templateType: _selectedTemplate,
-        ownerEmail: _googleOwnerEmail,
-      );
-
-      // 3. Muat ulang katalog POS & konfigurasikan Cloud Listener
-      posProv.loadData();
-      final updatedSettings = settingsProv.settings;
-      onlineOrderProv.syncWithSettings(updatedSettings);
-
-      // 4. Sinkronkan katalog template baru ke Server SaaS agar web pemesanan meja langsung terisi
-      final prods = posProv.products;
-      if (prods.isNotEmpty) {
-        final catMap = {for (var c in posProv.categories) c.id: c.name};
-        await cloudSync.syncMenuToCloud(
-          prods,
-          categoryNames: catMap,
-          restoName: storeName,
-        );
-      }
-
-      // 5. Otomatis login sebagai Owner
-      await authProv.loginWithPin(ownerPin.isNotEmpty ? ownerPin : '9999');
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '🎉 Selamat datang di $storeName! Masa aktif Trial 14 Hari telah aktif.',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: AppTheme.emeraldGreen,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Terjadi kesalahan registrasi: $e'),
-          backgroundColor: AppTheme.dangerRed,
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? AppTheme.darkScaffold : AppTheme.lightScaffold;
-    final cardColor = isDark ? AppTheme.darkCardSurface : Colors.white;
-    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-    final subTextColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
-
-    return Scaffold(
-      backgroundColor: bgColor,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 720),
-              child: Card(
-                color: cardColor,
-                elevation: 4,
-                shadowColor: Colors.black26,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  side: BorderSide(
-                    color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                    width: 1,
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Header Brand & Logo
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [AppTheme.primaryAmber, AppTheme.warningOrange],
-                              ),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 32),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      'Setup Resto / Kafe Baru',
-                                      style: TextStyle(
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold,
-                                        color: textColor,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.emeraldGreen.withOpacity(0.15),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: const Text(
-                                        'Trial 14 Hari',
-                                        style: TextStyle(
-                                          color: AppTheme.emeraldGreen,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Lengkapi data awal kafe Anda untuk mengaktifkan sistem POS & Web QR Meja',
-                                  style: TextStyle(fontSize: 13, color: subTextColor),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 28),
-
-                      // Stepper Header
-                      _buildStepIndicator(isDark),
-                      const SizedBox(height: 28),
-
-                      // Step Content
-                      if (_currentStep == 0) _buildStep1(textColor, subTextColor, isDark),
-                      if (_currentStep == 1) _buildStep2(textColor, subTextColor, isDark),
-                      if (_currentStep == 2) _buildStep3(textColor, subTextColor, isDark),
-
-                      const SizedBox(height: 32),
-
-                      // Navigation Buttons
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          if (_currentStep > 0)
-                            OutlinedButton.icon(
-                              onPressed: _isLoading ? null : _prevStep,
-                              icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                              label: const Text('Kembali'),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            )
-                          else
-                            const SizedBox.shrink(),
-
-                          if (_currentStep < 2)
-                            ElevatedButton.icon(
-                              onPressed: _nextStep,
-                              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                              label: const Text('Lanjutkan'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primaryAmber,
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                elevation: 0,
-                              ),
-                            )
-                          else
-                            ElevatedButton.icon(
-                              onPressed: _isLoading ? null : _submitRegistration,
-                              icon: _isLoading
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                                    )
-                                  : const Icon(Icons.rocket_launch_rounded, size: 18),
-                              label: Text(_isLoading ? 'Mendaftarkan...' : 'Daftar & Mulai Trial 14 Hari'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primaryAmber,
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                elevation: 0,
-                              ),
-                            ),
-                        ],
-                      ),
-
-                      if (_currentStep == 0) ...[
-                        const SizedBox(height: 24),
-                        const Divider(),
-                        const SizedBox(height: 12),
-                        Center(
-                          child: TextButton.icon(
-                            onPressed: _showConnectExistingDialog,
-                            icon: const Icon(Icons.link_rounded, size: 16),
-                            label: const Text(
-                              'Sudah punya outlet? Tautkan HP Karyawan (Kasir / Dapur) di sini',
-                              style: TextStyle(fontSize: 13),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  // ==========================================================================
+  // LOGIKA AKUN GOOGLE & MULTI-OUTLET SAAS (OWNER)
+  // ==========================================================================
 
   /// Membuka dialog otentikasi Akun Google untuk Pemilik Resto (Owner).
-  /// Memeriksa outlet terdaftar di SaaS Cloud atau mengaktifkan akun baru.
   Future<void> _handleGoogleSignIn() async {
     final emailCtrl = TextEditingController(text: _googleOwnerEmail ?? '');
     final nameCtrl = TextEditingController(text: _googleOwnerName ?? '');
@@ -422,7 +170,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 keyboardType: TextInputType.emailAddress,
                 decoration: InputDecoration(
                   labelText: 'Email Google *',
-                  hintText: 'contoh: owner@gmail.com',
+                  hintText: 'contoh: owner@samelona.com',
                   prefixIcon: const Icon(Icons.email_outlined),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 ),
@@ -431,7 +179,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               TextField(
                 controller: nameCtrl,
                 decoration: InputDecoration(
-                  labelText: 'Nama Lengkap / Pemilik *',
+                  labelText: 'Nama Lengkap Pemilik *',
                   hintText: 'contoh: Budi Santoso',
                   prefixIcon: const Icon(Icons.person_outline),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -473,14 +221,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final cloudSync = CloudSyncService(
-        serverUrl: CloudSyncService.defaultServerUrl,
-      );
-
-      final authRes = await cloudSync.authenticateWithGoogle(
-        email: email,
-        name: name,
-      );
+      final cloudSync = CloudSyncService(serverUrl: CloudSyncService.defaultServerUrl);
+      final authRes = await cloudSync.authenticateWithGoogle(email: email, name: name);
 
       if (!mounted) return;
 
@@ -495,10 +237,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         });
 
         if (!isNew && rawTenants.isNotEmpty) {
-          // Owner telah memiliki cabang/outlet terdaftar: Buka modal pilihan outlet
+          // Owner memiliki outlet terdaftar: Tampilkan modal pilihan cabang
           await _showOutletSelectionDialog(email, name, rawTenants);
         } else {
-          // Pendaftaran baru dengan akun Google
+          // Owner baru: Arahkan ke Wizard Pendaftaran Resto Baru
+          setState(() {
+            _wizardStep = 0;
+            _currentView = OnboardingView.ownerNewTenant;
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('✓ Akun Google $email terhubung! Lengkapi nama resto Anda di bawah.'),
@@ -525,7 +271,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  /// Modal pemilihan cabang / outlet yang dimiliki oleh akun Google Owner
+  /// Modal pemilihan cabang / outlet yang dimiliki akun Google Owner
   Future<void> _showOutletSelectionDialog(
     String email,
     String name,
@@ -563,7 +309,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: tenants.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
                   itemBuilder: (ctx, index) {
                     final t = tenants[index] as Map<String, dynamic>;
                     final bName = t['businessName'] ?? t['restoId'];
@@ -579,7 +325,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: AppTheme.primaryAmber.withOpacity(0.2),
+                          backgroundColor: AppTheme.primaryAmber.withValues(alpha: 0.2),
                           child: const Icon(Icons.store_rounded, color: AppTheme.primaryAmber),
                         ),
                         title: Text(bName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -601,12 +347,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               OutlinedButton.icon(
                 onPressed: () {
                   Navigator.pop(dlgCtx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Silakan lengkapi formulir di bawah untuk mendaftarkan cabang baru.')),
-                  );
+                  setState(() {
+                    _wizardStep = 0;
+                    _currentView = OnboardingView.ownerNewTenant;
+                  });
                 },
                 icon: const Icon(Icons.add_business_rounded, size: 16),
-                label: const Text('+ Buat Cabang / Resto Baru'),
+                label: const Text('+ Ingin Buka Cabang / Resto Baru Lainnya'),
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size.fromHeight(42),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -724,368 +471,814 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  /// Dialog 2 Tahap untuk menautkan perangkat karyawan (Kasir/Dapur) ke outlet terdaftar
-  Future<void> _showConnectExistingDialog() async {
-    final restoIdCtrl = TextEditingController();
-    final usernameCtrl = TextEditingController();
-    final pinCtrl = TextEditingController();
+  /// Menyelesaikan proses onboarding & registrasi SaaS untuk tenant baru
+  Future<void> _submitRegistration() async {
+    setState(() => _isLoading = true);
 
-    int pairingStage = 1; // 1: Input Resto ID & Username, 2: Input PIN Keamanan
-    bool isProcessing = false;
-    String? errorMsg;
-    Map<String, dynamic>? verifiedStaffData;
+    final storeName = _storeNameController.text.trim();
+    final restoId = _restoIdController.text.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-');
+    final phone = _phoneController.text.trim();
+    final address = _addressController.text.trim();
+    final ownerName = _ownerNameController.text.trim();
+    final ownerPin = _ownerPinController.text.trim();
+    final cashierName = _cashierNameController.text.trim();
+    final cashierPin = _cashierPinController.text.trim();
 
-    await showDialog(
-      context: context,
-      barrierDismissible: !isProcessing,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDlgState) {
-          final isKitchen = verifiedStaffData?['staff']?['role'] == 'kitchen';
-          final staffName = verifiedStaffData?['staff']?['name'] ?? '';
-          final restoName = verifiedStaffData?['restoName'] ?? '';
+    final settingsProv = context.read<SettingsProvider>();
+    final posProv = context.read<PosProvider>();
+    final onlineOrderProv = context.read<OnlineOrderProvider>();
+    final authProv = context.read<AuthProvider>();
 
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: Row(
-              children: [
-                Icon(
-                  pairingStage == 1 ? Icons.phonelink_setup_rounded : Icons.shield_outlined,
-                  color: AppTheme.primaryAmber,
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  pairingStage == 1 ? 'Tautkan Perangkat Karyawan' : 'Verifikasi PIN Keamanan',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (pairingStage == 1) ...[
-                      const Text(
-                        'Masukkan Resto ID toko dan Username Anda untuk menautkan HP ini ke sistem outlet.',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: restoIdCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Resto ID *',
-                          hintText: 'contoh: samelona',
-                          prefixIcon: const Icon(Icons.storefront_outlined),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: usernameCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Username Karyawan *',
-                          hintText: 'contoh: lukman',
-                          prefixIcon: const Icon(Icons.person_outline),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          // Dialog input payload QR scan dari tablet kasir
-                          final qrInputCtrl = TextEditingController();
-                          final qrResult = await showDialog<String>(
-                            context: context,
-                            builder: (qCtx) => AlertDialog(
-                              title: const Text('Pindai / Tempel Kode QR Kasir', style: TextStyle(fontSize: 15)),
-                              content: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Text('Arahkan kamera ke QR tablet kasir atau tempel teks kode QR:', style: TextStyle(fontSize: 12)),
-                                  const SizedBox(height: 12),
-                                  TextField(
-                                    controller: qrInputCtrl,
-                                    decoration: const InputDecoration(
-                                      hintText: '{"restoId":"samelona","username":"lukman"}',
-                                      border: OutlineInputBorder(),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(qCtx), child: const Text('Batal')),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(qCtx, qrInputCtrl.text.trim()),
-                                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryAmber, foregroundColor: Colors.black),
-                                  child: const Text('Gunakan'),
-                                ),
-                              ],
-                            ),
-                          );
+    try {
+      // 1. Kirim registrasi ke Backend SaaS Server (Masa Trial 14 Hari)
+      final cloudSync = CloudSyncService(
+        serverUrl: CloudSyncService.defaultServerUrl,
+        restoId: restoId,
+      );
 
-                          if (qrResult != null && qrResult.isNotEmpty) {
-                            try {
-                              final parsed = jsonDecode(qrResult);
-                              if (parsed['restoId'] != null) {
-                                restoIdCtrl.text = parsed['restoId'];
-                              }
-                              if (parsed['username'] != null) {
-                                usernameCtrl.text = parsed['username'];
-                              }
-                            } catch (_) {
-                              // Plain string parsing fallback
-                              if (qrResult.contains('|')) {
-                                final parts = qrResult.split('|');
-                                restoIdCtrl.text = parts[0];
-                                if (parts.length > 1) usernameCtrl.text = parts[1];
-                              }
-                            }
-                          }
-                        },
-                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
-                        label: const Text('Pindai Kode QR dari Tablet Kasir', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(40),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                    ] else ...[
-                      // Stage 2: Profil Karyawan Terverifikasi & Input PIN
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withOpacity(0.3),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              backgroundColor: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withOpacity(0.2),
-                              child: Icon(
-                                isKitchen ? Icons.soup_kitchen_rounded : Icons.person_rounded,
-                                color: isKitchen ? Colors.orange.shade800 : AppTheme.emeraldGreen,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    staffName,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '$restoName • ${isKitchen ? "Koki Dapur (KDS)" : "Kasir POS"}',
-                                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Masukkan PIN rahasia Anda ($staffName) untuk mengonfirmasi kepemilikan perangkat ini:',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: pinCtrl,
-                        keyboardType: TextInputType.number,
-                        maxLength: 6,
-                        obscureText: true,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        decoration: InputDecoration(
-                          labelText: 'PIN Keamanan (4–6 Digit) *',
-                          hintText: '••••',
-                          prefixIcon: const Icon(Icons.lock_outline),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                    ],
-                    if (errorMsg != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        errorMsg!,
-                        style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ],
-                ),
+      final regResult = await cloudSync.registerTenant(
+        restoId: restoId,
+        businessName: storeName,
+        businessType: _selectedBusinessType,
+        ownerName: ownerName,
+        ownerEmail: _googleOwnerEmail,
+        phone: phone,
+        address: address,
+        trialDays: 14,
+      );
+
+      if (regResult != null && regResult['success'] == true) {
+        debugPrint('[Onboarding] Pendaftaran berhasil di SaaS cloud: $restoId');
+      }
+
+      // 2. Simpan seluruh konfigurasi akun & katalog template ke penyimpanan lokal
+      await settingsProv.setupNewTenant(
+        storeName: storeName,
+        restoId: restoId,
+        businessType: _selectedBusinessType,
+        address: address.isNotEmpty ? address : 'Jl. Utama No. 01',
+        phoneWA: phone.isNotEmpty ? phone : '081234567890',
+        ownerName: ownerName.isNotEmpty ? ownerName : 'Owner',
+        ownerPin: ownerPin.isNotEmpty ? ownerPin : '9999',
+        cashierName: cashierName.isNotEmpty ? cashierName : 'Kasir 1',
+        cashierPin: cashierPin.isNotEmpty ? cashierPin : '1234',
+        templateType: _selectedTemplate,
+        ownerEmail: _googleOwnerEmail,
+      );
+
+      // 3. Muat ulang katalog POS & konfigurasikan Cloud Listener
+      posProv.loadData();
+      final updatedSettings = settingsProv.settings;
+      onlineOrderProv.syncWithSettings(updatedSettings);
+
+      // 4. Sinkronkan katalog template baru ke Server SaaS
+      final prods = posProv.products;
+      if (prods.isNotEmpty) {
+        final catMap = {for (var c in posProv.categories) c.id: c.name};
+        await cloudSync.syncMenuToCloud(
+          prods,
+          categoryNames: catMap,
+          restoName: storeName,
+        );
+      }
+
+      // 5. Otomatis login sebagai Owner
+      await authProv.loginWithPin(ownerPin.isNotEmpty ? ownerPin : '9999');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🎉 Selamat datang di $storeName! Masa aktif Trial 14 Hari telah aktif.'),
+          backgroundColor: AppTheme.emeraldGreen,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menyelesaikan registrasi: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ==========================================================================
+  // LOGIKA PENAUTAN PERANGKAT KARYAWAN (STAFF PAIRING)
+  // ==========================================================================
+
+  /// Verifikasi Tahap 1: Memeriksa Resto ID & Username Karyawan ke server
+  Future<void> _verifyStaffStage1() async {
+    final rid = _staffRestoIdController.text.trim().toLowerCase();
+    final uname = _staffUsernameController.text.trim().toLowerCase();
+
+    if (rid.isEmpty || uname.isEmpty) {
+      setState(() => _staffErrorMessage = 'Resto ID dan Username wajib diisi');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _staffErrorMessage = null;
+    });
+
+    try {
+      final cloudSync = CloudSyncService(
+        serverUrl: CloudSyncService.defaultServerUrl,
+        restoId: rid,
+      );
+
+      final verifyRes = await cloudSync.verifyStaffDevice(restoId: rid, username: uname);
+
+      if (verifyRes != null && verifyRes['success'] == true) {
+        setState(() {
+          _verifiedStaffData = verifyRes;
+          _staffPin = '';
+          _currentView = OnboardingView.staffPairingStage2;
+        });
+      } else {
+        setState(() {
+          _staffErrorMessage = cloudSync.lastError ?? 'Karyawan tidak ditemukan di outlet ini.';
+        });
+      }
+    } catch (e) {
+      setState(() => _staffErrorMessage = 'Kendala koneksi: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  /// Verifikasi Tahap 2: Mengirim PIN untuk mengunci HP karyawan secara permanen
+  Future<void> _pairStaffStage2() async {
+    if (_staffPin.length < 4) {
+      setState(() => _staffErrorMessage = 'Masukkan 4 digit PIN Anda');
+      return;
+    }
+
+    final rid = _staffRestoIdController.text.trim().toLowerCase();
+    final uname = _staffUsernameController.text.trim().toLowerCase();
+
+    setState(() {
+      _isLoading = true;
+      _staffErrorMessage = null;
+    });
+
+    try {
+      final cloudSync = CloudSyncService(
+        serverUrl: CloudSyncService.defaultServerUrl,
+        restoId: rid,
+      );
+
+      final staffSalt = _verifiedStaffData?['staff']?['salt'] ?? '';
+      final pinHash = AuthService.hashPin(_staffPin, staffSalt);
+
+      final pairResult = await cloudSync.pairStaffDevice(
+        restoId: rid,
+        username: uname,
+        pinHash: pinHash,
+      );
+
+      if (pairResult != null && pairResult['success'] == true) {
+        if (!mounted) return;
+        final settingsProv = context.read<SettingsProvider>();
+        final posProv = context.read<PosProvider>();
+        final onlineOrderProv = context.read<OnlineOrderProvider>();
+        final authProv = context.read<AuthProvider>();
+
+        final staffMap = pairResult['staff'] as Map<String, dynamic>;
+        final staffUser = UserModel(
+          id: staffMap['id'] ?? 'user_$uname',
+          name: staffMap['name'] ?? uname,
+          username: staffMap['username'] ?? uname,
+          role: staffMap['role'] ?? 'cashier',
+          pinHash: pinHash,
+          salt: staffSalt,
+          isActive: true,
+        );
+
+        // Simpan konfigurasi penautan perangkat permanen
+        await settingsProv.pairStaffDevice(
+          restoId: rid,
+          storeName: pairResult['restoName'] ?? 'Resto Digital',
+          staffUser: staffUser,
+        );
+
+        posProv.loadData();
+        onlineOrderProv.syncWithSettings(settingsProv.settings);
+
+        // Otomatis login dengan PIN karyawan
+        await authProv.loginWithPin(_staffPin);
+
+        if (mounted) {
+          final roleTitle = staffUser.isKitchen ? 'Koki Dapur (KDS)' : 'Kasir POS';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '🎉 HP Anda resmi tertaut ke ${pairResult["restoName"]} sebagai $roleTitle (${staffUser.name})!',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
+              backgroundColor: AppTheme.emeraldGreen,
+              duration: const Duration(seconds: 4),
             ),
-            actions: [
-              if (pairingStage == 2)
-                TextButton(
-                  onPressed: isProcessing
-                      ? null
-                      : () => setDlgState(() {
-                            pairingStage = 1;
-                            errorMsg = null;
-                          }),
-                  child: const Text('Ganti Akun'),
-                )
-              else
-                TextButton(
-                  onPressed: isProcessing ? null : () => Navigator.pop(ctx),
-                  child: const Text('Batal'),
-                ),
-              ElevatedButton(
-                onPressed: isProcessing
-                    ? null
-                    : () async {
-                        final rid = restoIdCtrl.text.trim().toLowerCase();
-                        final uname = usernameCtrl.text.trim().toLowerCase();
-
-                        if (pairingStage == 1) {
-                          if (rid.isEmpty || uname.isEmpty) {
-                            setDlgState(() => errorMsg = 'Resto ID dan Username wajib diisi');
-                            return;
-                          }
-
-                          setDlgState(() {
-                            isProcessing = true;
-                            errorMsg = null;
-                          });
-
-                          final cloudSync = CloudSyncService(
-                            serverUrl: CloudSyncService.defaultServerUrl,
-                            restoId: rid,
-                          );
-
-                          final verifyResult = await cloudSync.verifyStaffDevice(
-                            restoId: rid,
-                            username: uname,
-                          );
-
-                          if (verifyResult != null && verifyResult['success'] == true) {
-                            setDlgState(() {
-                              isProcessing = false;
-                              verifiedStaffData = verifyResult;
-                              pairingStage = 2; // Berpindah ke Stage 2 (Verifikasi PIN)
-                            });
-                          } else {
-                            setDlgState(() {
-                              isProcessing = false;
-                              errorMsg = cloudSync.lastError ?? 'Karyawan tidak ditemukan di outlet ini.';
-                            });
-                          }
-                        } else {
-                          // Stage 2: Validasi PIN & Simpan Pairing
-                          final pin = pinCtrl.text.trim();
-                          if (pin.length < 4) {
-                            setDlgState(() => errorMsg = 'PIN minimal 4 digit angka');
-                            return;
-                          }
-
-                          setDlgState(() {
-                            isProcessing = true;
-                            errorMsg = null;
-                          });
-
-                          final cloudSync = CloudSyncService(
-                            serverUrl: CloudSyncService.defaultServerUrl,
-                            restoId: rid,
-                          );
-
-                          final staffSalt = verifiedStaffData?['staff']?['salt'] ?? '';
-                          final pinHash = AuthService.hashPin(pin, staffSalt);
-
-                          final pairResult = await cloudSync.pairStaffDevice(
-                            restoId: rid,
-                            username: uname,
-                            pinHash: pinHash,
-                          );
-
-                          if (pairResult != null && pairResult['success'] == true) {
-                            if (!mounted) return;
-                            final settingsProv = context.read<SettingsProvider>();
-                            final posProv = context.read<PosProvider>();
-                            final onlineOrderProv = context.read<OnlineOrderProvider>();
-                            final authProv = context.read<AuthProvider>();
-
-                            final staffMap = pairResult['staff'] as Map<String, dynamic>;
-                            final staffUser = UserModel(
-                              id: staffMap['id'] ?? 'user_$uname',
-                              name: staffMap['name'] ?? staffName,
-                              username: staffMap['username'] ?? uname,
-                              role: staffMap['role'] ?? 'cashier',
-                              pinHash: pinHash,
-                              salt: staffSalt,
-                              isActive: true,
-                            );
-
-                            // Simpan konfigurasi penautan perangkat permanen
-                            await settingsProv.pairStaffDevice(
-                              restoId: rid,
-                              storeName: pairResult['restoName'] ?? restoName,
-                              staffUser: staffUser,
-                            );
-
-                            posProv.loadData();
-                            onlineOrderProv.syncWithSettings(settingsProv.settings);
-
-                            // Otomatis login dengan PIN karyawan
-                            await authProv.loginWithPin(pin);
-
-                            if (ctx.mounted) Navigator.pop(ctx);
-
-                            if (context.mounted) {
-                              final roleTitle = staffUser.isKitchen ? 'Koki Dapur (KDS)' : 'Kasir POS';
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    '🎉 HP Anda resmi tertaut ke ${pairResult["restoName"]} sebagai $roleTitle (${staffUser.name})!',
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
-                                  ),
-                                  backgroundColor: AppTheme.emeraldGreen,
-                                  duration: const Duration(seconds: 4),
-                                ),
-                              );
-                            }
-                          } else {
-                            setDlgState(() {
-                              isProcessing = false;
-                              errorMsg = cloudSync.lastError ?? 'PIN keamanan salah.';
-                            });
-                          }
-                        }
-                      },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryAmber,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                child: Text(
-                  isProcessing
-                      ? 'Memproses...'
-                      : (pairingStage == 1 ? 'Lanjutkan' : 'Verifikasi & Tautkan HP'),
-                ),
-              ),
-            ],
           );
-        },
+        }
+      } else {
+        setState(() {
+          _staffErrorMessage = cloudSync.lastError ?? 'PIN keamanan salah.';
+          _staffPin = '';
+        });
+      }
+    } catch (e) {
+      setState(() => _staffErrorMessage = 'Kendala penautan: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Dialog Pindai / Tempel QR Code Kasir
+  Future<void> _showQrScanDialog() async {
+    final qrInputCtrl = TextEditingController();
+    final qrResult = await showDialog<String>(
+      context: context,
+      builder: (qCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.qr_code_scanner_rounded, color: AppTheme.primaryAmber),
+            SizedBox(width: 10),
+            Text('Pindai Kode QR Kasir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Arahkan kamera ke layar Kasir Utama atau tempel data teks QR di bawah:',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: qrInputCtrl,
+              decoration: InputDecoration(
+                hintText: '{"restoId":"samelona","username":"lukman"}',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(qCtx), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(qCtx, qrInputCtrl.text.trim()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryAmber,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Gunakan Data QR'),
+          ),
+        ],
+      ),
+    );
+
+    if (qrResult != null && qrResult.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(qrResult);
+        if (parsed['restoId'] != null) {
+          _staffRestoIdController.text = parsed['restoId'];
+        }
+        if (parsed['username'] != null) {
+          _staffUsernameController.text = parsed['username'];
+        }
+      } catch (_) {
+        if (qrResult.contains('|')) {
+          final parts = qrResult.split('|');
+          _staffRestoIdController.text = parts[0];
+          if (parts.length > 1) _staffUsernameController.text = parts[1];
+        }
+      }
+      // Langsung jalankan verifikasi tahap 1
+      _verifyStaffStage1();
+    }
+  }
+
+  // ==========================================================================
+  // WIDGET BUILDER UTAMA (ROUTING VIEW)
+  // ==========================================================================
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? AppTheme.darkScaffold : AppTheme.lightScaffold;
+    final cardColor = isDark ? AppTheme.darkCardSurface : Colors.white;
+    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+    final subTextColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+
+    return Scaffold(
+      backgroundColor: bgColor,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 700),
+              child: Card(
+                color: cardColor,
+                elevation: 4,
+                shadowColor: Colors.black26,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  side: BorderSide(
+                    color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                    width: 1,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: _buildCurrentViewContent(textColor, subTextColor, isDark),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  /// Indikator Tahapan (Step Indicator)
+  Widget _buildCurrentViewContent(Color textColor, Color subTextColor, bool isDark) {
+    switch (_currentView) {
+      case OnboardingView.welcomeGateway:
+        return _buildWelcomeGateway(textColor, subTextColor, isDark);
+      case OnboardingView.ownerHub:
+        return _buildOwnerHub(textColor, subTextColor, isDark);
+      case OnboardingView.ownerNewTenant:
+        return _buildOwnerNewTenantWizard(textColor, subTextColor, isDark);
+      case OnboardingView.staffPairingStage1:
+        return _buildStaffPairingStage1(textColor, subTextColor, isDark);
+      case OnboardingView.staffPairingStage2:
+        return _buildStaffPairingStage2(textColor, subTextColor, isDark);
+    }
+  }
+
+  // ==========================================================================
+  // LAYAR 1: WELCOME GATEWAY (PILIHAN PERAN PERANGKAT)
+  // ==========================================================================
+
+  Widget _buildWelcomeGateway(Color textColor, Color subTextColor, bool isDark) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Brand Header
+        Center(
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppTheme.primaryAmber, AppTheme.warningOrange],
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryAmber.withValues(alpha: 0.3),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 36),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'RESTO DIGITAL POS',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Selamat Datang! Silakan pilih peran perangkat ini untuk memulai:',
+                style: TextStyle(fontSize: 13, color: subTextColor),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 32),
+
+        // 2 Kartu Peran Utama
+        Row(
+          children: [
+            // Kartu 1: Saya Pemilik Usaha
+            Expanded(
+              child: _buildRoleCard(
+                icon: Icons.workspace_premium_rounded,
+                iconColor: AppTheme.primaryAmber,
+                badgeText: 'Pemilik Usaha',
+                badgeColor: AppTheme.primaryAmber,
+                title: 'Saya Pemilik Resto',
+                desc: 'Login akun Google untuk kelola cabang terdaftar, atau daftarkan resto baru dengan Trial 14 Hari.',
+                actionLabel: 'Masuk Mode Owner →',
+                isDark: isDark,
+                onTap: () {
+                  setState(() => _currentView = OnboardingView.ownerHub);
+                },
+              ),
+            ),
+            const SizedBox(width: 16),
+
+            // Kartu 2: Saya Karyawan Toko
+            Expanded(
+              child: _buildRoleCard(
+                icon: Icons.badge_rounded,
+                iconColor: AppTheme.emeraldGreen,
+                badgeText: 'Kasir / Koki Dapur',
+                badgeColor: AppTheme.emeraldGreen,
+                title: 'Saya Karyawan Toko',
+                desc: 'Tautkan HP atau tablet ini langsung ke toko menggunakan Scan QR Kasir atau Resto ID & PIN pribadi.',
+                actionLabel: 'Tautkan HP Ini →',
+                isDark: isDark,
+                onTap: () {
+                  setState(() => _currentView = OnboardingView.staffPairingStage1);
+                },
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 24),
+        Center(
+          child: Text(
+            'Sistem Kasir & Operasional Resto Modern • Zero Complex Setup',
+            style: TextStyle(fontSize: 11, color: subTextColor),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoleCard({
+    required IconData icon,
+    required Color iconColor,
+    required String badgeText,
+    required Color badgeColor,
+    required String title,
+    required String desc,
+    required String actionLabel,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCardSurface : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? AppTheme.darkBorder : Colors.grey.shade200,
+          width: 1.5,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(icon, color: iconColor, size: 28),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        badgeText,
+                        style: TextStyle(
+                          color: badgeColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      title,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      desc,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey, height: 1.4),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Text(
+                      actionLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: iconColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==========================================================================
+  // LAYAR 2A: OWNER PORTAL (LOGIN GOOGLE / CABANG / DAFTAR BARU)
+  // ==========================================================================
+
+  Widget _buildOwnerHub(Color textColor, Color subTextColor, bool isDark) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Tombol Kembali ke Welcome Gateway
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() => _currentView = OnboardingView.welcomeGateway);
+            },
+            icon: const Icon(Icons.arrow_back_rounded, size: 16),
+            label: const Text('Kembali ke Pilihan Peran'),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Header Owner Hub
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryAmber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.workspace_premium_rounded, color: AppTheme.primaryAmber, size: 28),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Portal Pemilik Usaha (Owner)',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Kelola cabang restoran terdaftar atau daftarkan outlet baru',
+                    style: TextStyle(fontSize: 12, color: subTextColor),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 28),
+
+        // Card Opsi Utama: Google Sign In
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkCardSurface : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark ? AppTheme.darkBorder : Colors.grey.shade200,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Masuk Cepat dengan Akun Google',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Sistem akan otomatis mendeteksi seluruh outlet terdaftar milik Anda, atau mendaftarkan outlet baru secara instan.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+
+              // Tombol Google
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _handleGoogleSignIn,
+                icon: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                  child: const Icon(Icons.g_mobiledata_rounded, color: Colors.blue, size: 20),
+                ),
+                label: Text(
+                  _isLoading ? 'Menghubungkan...' : 'Lanjutkan dengan Akun Google',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade600,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text('atau tanpa akun Google', style: TextStyle(fontSize: 12, color: subTextColor)),
+            ),
+            Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
+          ],
+        ),
+        const SizedBox(height: 18),
+
+        // Tombol Setup Resto Baru Manual
+        OutlinedButton.icon(
+          onPressed: () {
+            setState(() {
+              _wizardStep = 0;
+              _currentView = OnboardingView.ownerNewTenant;
+            });
+          },
+          icon: const Icon(Icons.add_business_rounded, size: 18),
+          label: const Text('Daftarkan Resto Baru Secara Manual'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ==========================================================================
+  // LAYAR 2A-WIZARD: SETUP RESTO BARU 3-LANGKAH (TRIAL 14 HARI)
+  // ==========================================================================
+
+  Widget _buildOwnerNewTenantWizard(Color textColor, Color subTextColor, bool isDark) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Tombol Kembali ke Owner Hub
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() => _currentView = OnboardingView.ownerHub);
+            },
+            icon: const Icon(Icons.arrow_back_rounded, size: 16),
+            label: const Text('Kembali ke Portal Owner'),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Header Wizard
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [AppTheme.primaryAmber, AppTheme.warningOrange]),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Setup Resto / Kafe Baru',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.emeraldGreen.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'Trial 14 Hari',
+                          style: TextStyle(color: AppTheme.emeraldGreen, fontWeight: FontWeight.bold, fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Aktifkan POS kasir dan link Web Pemesanan Meja dalam 3 langkah mudah',
+                    style: TextStyle(fontSize: 12, color: subTextColor),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // Indikator Stepper
+        _buildStepIndicator(isDark),
+        const SizedBox(height: 24),
+
+        // Konten Step
+        if (_wizardStep == 0) _buildWizardStep1(textColor, subTextColor, isDark),
+        if (_wizardStep == 1) _buildWizardStep2(textColor, subTextColor, isDark),
+        if (_wizardStep == 2) _buildWizardStep3(textColor, subTextColor, isDark),
+
+        const SizedBox(height: 28),
+
+        // Tombol Navigasi Stepper
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            if (_wizardStep > 0)
+              OutlinedButton.icon(
+                onPressed: _isLoading ? null : _prevWizardStep,
+                icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                label: const Text('Sebelumnya'),
+              )
+            else
+              const SizedBox.shrink(),
+
+            if (_wizardStep < 2)
+              ElevatedButton.icon(
+                onPressed: _nextWizardStep,
+                icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                label: const Text('Lanjutkan'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryAmber,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                ),
+              )
+            else
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _submitRegistration,
+                icon: _isLoading
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                    : const Icon(Icons.rocket_launch_rounded, size: 16),
+                label: Text(_isLoading ? 'Mendaftarkan...' : 'Daftar & Mulai Trial 14 Hari'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryAmber,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _buildStepIndicator(bool isDark) {
     final steps = ['Identitas Usaha', 'Akun & PIN', 'Katalog Menu'];
 
     return Row(
       children: List.generate(steps.length, (index) {
-        final isActive = index == _currentStep;
-        final isCompleted = index < _currentStep;
+        final isActive = index == _wizardStep;
+        final isCompleted = index < _wizardStep;
         final color = isCompleted
             ? AppTheme.emeraldGreen
             : (isActive ? AppTheme.primaryAmber : (isDark ? Colors.white24 : Colors.black26));
@@ -1094,23 +1287,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           child: Row(
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(isActive || isCompleted ? 0.2 : 0.05),
+                  color: color.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
-                  border: Border.all(color: color, width: 2),
+                  border: Border.all(color: color, width: 1.5),
                 ),
                 child: Center(
                   child: isCompleted
                       ? const Icon(Icons.check, size: 16, color: AppTheme.emeraldGreen)
                       : Text(
                           '${index + 1}',
-                          style: TextStyle(
-                            color: color,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
+                          style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 12),
                         ),
                 ),
               ),
@@ -1119,7 +1308,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: Text(
                   steps[index],
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                     color: isActive ? color : (isDark ? Colors.white54 : Colors.black54),
                   ),
@@ -1127,14 +1316,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
               if (index < steps.length - 1)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Container(
-                    width: 20,
-                    height: 1,
-                    color: isDark ? Colors.white12 : Colors.black12,
-                  ),
-                ),
+                Container(width: 16, height: 1, color: isDark ? Colors.white12 : Colors.black12),
             ],
           ),
         );
@@ -1142,166 +1324,80 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  /// Step 1: Identitas Usaha & Slug Resto ID
-  Widget _buildStep1(Color textColor, Color subTextColor, bool isDark) {
+  Widget _buildWizardStep1(Color textColor, Color subTextColor, bool isDark) {
     return Form(
       key: _step1Key,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Langkah 1: Identitas Kafe / Restoran',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
-          ),
-          const SizedBox(height: 16),
-
-          // Tombol Login / Lanjutkan dengan Akun Google untuk Owner
-          Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: _googleOwnerEmail != null
-                    ? AppTheme.emeraldGreen
-                    : (isDark ? AppTheme.darkBorder : Colors.grey.shade300),
-                width: _googleOwnerEmail != null ? 1.5 : 1.0,
+          if (_googleOwnerEmail != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppTheme.emeraldGreen.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.emeraldGreen.withValues(alpha: 0.3)),
               ),
-              borderRadius: BorderRadius.circular(14),
-              color: _googleOwnerEmail != null
-                  ? AppTheme.emeraldGreen.withOpacity(0.08)
-                  : (isDark ? AppTheme.darkCardSurface : Colors.grey.shade50),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: _isLoading ? null : _handleGoogleSignIn,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.g_mobiledata_rounded, color: Colors.blue, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          _googleOwnerEmail != null
-                              ? 'Terhubung dengan Google: $_googleOwnerEmail'
-                              : 'Lanjutkan dengan Akun Google (Owner)',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: _googleOwnerEmail != null ? AppTheme.emeraldGreen : textColor,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (_googleOwnerEmail != null) ...[
-                        const SizedBox(width: 8),
-                        const Icon(Icons.check_circle_rounded, color: AppTheme.emeraldGreen, size: 18),
-                      ],
-                    ],
-                  ),
-                ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: AppTheme.emeraldGreen, size: 16),
+                  const SizedBox(width: 8),
+                  Text('Akun Google Terhubung: $_googleOwnerEmail',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.emeraldGreen)),
+                ],
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  _googleOwnerEmail != null
-                      ? 'lengkapi detail resto di bawah'
-                      : 'atau lengkapi formulir manual',
-                  style: TextStyle(fontSize: 12, color: subTextColor),
-                ),
-              ),
-              Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
-            ],
-          ),
-          const SizedBox(height: 20),
+            const SizedBox(height: 16),
+          ],
 
-          // Pilihan Jenis Usaha
           Text('Pilih Jenis Usaha:', style: TextStyle(fontSize: 13, color: subTextColor)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             children: [
-              _buildTypeChip('cafe', '☕ Coffee Shop / Kafe'),
-              _buildTypeChip('resto', '🍽️ Restoran / Rumah Makan'),
-              _buildTypeChip('warung', '🍜 Warung Makan / Kedai'),
+              _buildTypeChip('cafe', '☕ Coffee Shop'),
+              _buildTypeChip('resto', '🍽️ Restoran'),
+              _buildTypeChip('warung', '🍜 Warung Makan'),
               _buildTypeChip('other', '🛍️ Usaha Lainnya'),
             ],
           ),
           const SizedBox(height: 16),
 
-          // Nama Kafe
           TextFormField(
             controller: _storeNameController,
             decoration: InputDecoration(
               labelText: 'Nama Kafe / Restoran *',
-              hintText: 'Contoh: Kopi Senja, Dapoer Sedap',
+              hintText: 'Contoh: Kopi Senja, Resto Samelona',
               prefixIcon: const Icon(Icons.storefront_outlined),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            validator: (val) {
-              if (val == null || val.trim().isEmpty) return 'Nama kafe/restoran wajib diisi';
-              return null;
-            },
+            validator: (val) => (val == null || val.trim().isEmpty) ? 'Nama kafe wajib diisi' : null,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
-          // Resto ID (Slug unik)
           TextFormField(
             controller: _restoIdController,
             decoration: InputDecoration(
               labelText: 'Resto ID (Slug Unik Link Web) *',
               hintText: 'kopi-senja',
               prefixIcon: const Icon(Icons.link_rounded),
-              helperText: 'Akan digunakan untuk alamat Web QR Meja tamu: order.ipankhub.web.id/?resto=...',
+              helperText: 'order.ipankhub.web.id/?resto=...',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
             validator: (val) {
               if (val == null || val.trim().isEmpty) return 'Resto ID wajib diisi';
-              if (val.contains(' ')) return 'Resto ID tidak boleh menggunakan spasi (gunakan tanda strip -)';
+              if (val.contains(' ')) return 'Gunakan tanda strip (-) tanpa spasi';
               return null;
             },
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
-          // No WhatsApp Pemilik
           TextFormField(
             controller: _phoneController,
-            keyboardType: TextInputType.phone,
             decoration: InputDecoration(
-              labelText: 'Nomor WhatsApp Pemilik / Resto *',
-              hintText: 'Contoh: 081234567890',
-              prefixIcon: const Icon(Icons.phone_android_rounded),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            validator: (val) {
-              if (val == null || val.trim().isEmpty) return 'Nomor WhatsApp wajib diisi';
-              return null;
-            },
-          ),
-          const SizedBox(height: 16),
-
-          // Alamat
-          TextFormField(
-            controller: _addressController,
-            decoration: InputDecoration(
-              labelText: 'Alamat Usaha (Opsional)',
-              hintText: 'Contoh: Jl. Diponegoro No. 15, Bandung',
-              prefixIcon: const Icon(Icons.location_on_outlined),
+              labelText: 'No. WhatsApp Pemilik',
+              hintText: '08123456789',
+              prefixIcon: const Icon(Icons.phone_outlined),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
@@ -1315,228 +1411,102 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return ChoiceChip(
       label: Text(label),
       selected: isSelected,
-      onSelected: (selected) {
-        if (selected) {
-          setState(() {
-            _selectedBusinessType = type;
-            if (type == 'cafe') {
-              _selectedTemplate = TemplateBusinessType.coffeeShop;
-            } else if (type == 'resto') {
-              _selectedTemplate = TemplateBusinessType.restaurant;
-            }
-          });
-        }
-      },
+      onSelected: (val) => setState(() => _selectedBusinessType = type),
+      selectedColor: AppTheme.primaryAmber.withValues(alpha: 0.25),
+      labelStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        color: isSelected ? AppTheme.primaryAmber : null,
+      ),
     );
   }
 
-  /// Step 2: Akun Pemilik & Kasir Pertama
-  Widget _buildStep2(Color textColor, Color subTextColor, bool isDark) {
+  Widget _buildWizardStep2(Color textColor, Color subTextColor, bool isDark) {
     return Form(
       key: _step2Key,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Langkah 2: Akun Pemilik & Kasir',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
+          TextFormField(
+            controller: _ownerNameController,
+            decoration: InputDecoration(
+              labelText: 'Nama Pemilik (Owner) *',
+              prefixIcon: const Icon(Icons.person_outline),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            validator: (val) => (val == null || val.trim().isEmpty) ? 'Nama owner wajib diisi' : null,
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Atur akun untuk akses owner (laporan keuangan) dan kasir (operasional transaksi).',
-            style: TextStyle(fontSize: 13, color: subTextColor),
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
 
-          // Section Owner
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isDark ? AppTheme.darkSidebar : Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+          TextFormField(
+            controller: _ownerPinController,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            decoration: InputDecoration(
+              labelText: 'PIN Owner (4-6 Digit) *',
+              prefixIcon: const Icon(Icons.lock_outline),
+              helperText: 'Akan digunakan untuk membuka menu Pengaturan & Laporan',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: const [
-                    Icon(Icons.shield_outlined, color: AppTheme.primaryAmber, size: 20),
-                    SizedBox(width: 8),
-                    Text('Akun Pemilik (Owner)', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _ownerNameController,
-                  decoration: InputDecoration(
-                    labelText: 'Nama Pemilik *',
-                    hintText: 'Contoh: Bambang',
-                    prefixIcon: const Icon(Icons.person_outline),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  validator: (val) => val == null || val.trim().isEmpty ? 'Nama pemilik wajib diisi' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _ownerPinController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-                  decoration: InputDecoration(
-                    labelText: 'PIN Pemilik (4-6 Digit Angka) *',
-                    hintText: '9999',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    helperText: 'Digunakan untuk melihat omzet, laporan kas, & menu pengaturan rahasia',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  validator: (val) {
-                    if (val == null || val.trim().length < 4) return 'PIN Pemilik minimal 4 digit angka';
-                    return null;
-                  },
-                ),
-              ],
-            ),
+            validator: (val) => (val == null || val.length < 4) ? 'PIN minimal 4 digit' : null,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
 
-          // Section Kasir Pertama
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isDark ? AppTheme.darkSidebar : Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+          TextFormField(
+            controller: _cashierPinController,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            decoration: InputDecoration(
+              labelText: 'PIN Kasir Pertama *',
+              prefixIcon: const Icon(Icons.badge_outlined),
+              helperText: 'Untuk login harian staf kasir di layar lock screen',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: const [
-                    Icon(Icons.point_of_sale_rounded, color: AppTheme.accentCyan, size: 20),
-                    SizedBox(width: 8),
-                    Text('Akun Kasir Pertama', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _cashierNameController,
-                  decoration: InputDecoration(
-                    labelText: 'Nama Kasir Pertama *',
-                    hintText: 'Contoh: Kasir 1 / Rina',
-                    prefixIcon: const Icon(Icons.badge_outlined),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  validator: (val) => val == null || val.trim().isEmpty ? 'Nama kasir wajib diisi' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _cashierPinController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-                  decoration: InputDecoration(
-                    labelText: 'PIN Kasir (4-6 Digit Angka) *',
-                    hintText: '1234',
-                    prefixIcon: const Icon(Icons.pin_outlined),
-                    helperText: 'PIN kasir untuk masuk shift dan melayani transaksi harian',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  validator: (val) {
-                    if (val == null || val.trim().length < 4) return 'PIN Kasir minimal 4 digit angka';
-                    return null;
-                  },
-                ),
-              ],
-            ),
+            validator: (val) => (val == null || val.length < 4) ? 'PIN minimal 4 digit' : null,
           ),
         ],
       ),
     );
   }
 
-  /// Step 3: Template Menu Awal & Konfirmasi Trial 14 Hari
-  Widget _buildStep3(Color textColor, Color subTextColor, bool isDark) {
-    final restoId = _restoIdController.text.trim();
-
+  Widget _buildWizardStep3(Color textColor, Color subTextColor, bool isDark) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Langkah 3: Pilihan Menu Awal & Aktivasi',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
+          'Pilih Template Menu Awal:',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textColor),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Text(
-          'Pilih katalog awal yang ingin dipasang saat aplikasi pertama kali siap pakai:',
-          style: TextStyle(fontSize: 13, color: subTextColor),
+          'Dapat Anda ubah atau tambah menu baru kapan saja dari dashboard.',
+          style: TextStyle(fontSize: 12, color: subTextColor),
         ),
         const SizedBox(height: 16),
 
-        // Template Options
         _buildTemplateCard(
           type: TemplateBusinessType.coffeeShop,
           title: '☕ Template Coffee Shop / Kafe',
-          desc: 'Kopi Susu Gula Aren, Espresso, Latte, Matcha, Croissant, Roti Toast, French Fries, dll.',
+          desc: 'Berisi Kopi Susu, Espresso, Latte, Matcha, Croissant, dan Camilan.',
           isDark: isDark,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
+
         _buildTemplateCard(
           type: TemplateBusinessType.restaurant,
           title: '🍽️ Template Restoran / Rumah Makan',
-          desc: 'Nasi Goreng Spesial, Ayam Bakar Madu, Mie Goreng Seafood, Soto Ayam, Es Teh, Jus Alpukat.',
+          desc: 'Berisi Nasi Goreng, Ayam Bakar, Mie Goreng, Es Teh, dan Jus Segar.',
           isDark: isDark,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
+
         _buildTemplateCard(
           type: TemplateBusinessType.blank,
-          title: '✨ Mulai Bersih dari Nol (Database Kosong)',
-          desc: 'Katalog kosong tanpa menu contoh. Anda bisa input menu kafe Anda sendiri satu per satu.',
+          title: '✨ Bersih (Mulai dari Nol)',
+          desc: 'Katalog kosong, Anda bebas menginput kategori dan menu dari awal.',
           isDark: isDark,
-        ),
-
-        const SizedBox(height: 24),
-
-        // Banner Trial 14 Hari & Link Web
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: isDark
-                  ? [const Color(0xFF1B3828), const Color(0xFF132B1E)]
-                  : [const Color(0xFFE8F8F0), const Color(0xFFD4F2E3)],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.emeraldGreen.withOpacity(0.5)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: const [
-                  Icon(Icons.verified_rounded, color: AppTheme.emeraldGreen, size: 24),
-                  SizedBox(width: 10),
-                  Text(
-                    'Paket Uji Coba Gratis 14 Hari Aktif',
-                    style: TextStyle(
-                      color: AppTheme.emeraldGreen,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '• Nikmati seluruh fitur kasir, manajemen shift, dan laporan omzet tanpa batasan.\n'
-                '• Tamu di meja dapat langsung memesan via web mandiri di:\n'
-                '  https://order.ipankhub.web.id/?resto=${restoId.isNotEmpty ? restoId : 'resto-anda'}&table=01',
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.5,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                ),
-              ),
-            ],
-          ),
         ),
       ],
     );
@@ -1549,57 +1519,372 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     required bool isDark,
   }) {
     final isSelected = _selectedTemplate == type;
-    final borderColor = isSelected ? AppTheme.primaryAmber : (isDark ? AppTheme.darkBorder : AppTheme.lightBorder);
-
-    return InkWell(
-      onTap: () => setState(() => _selectedTemplate = type),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.primaryAmber.withOpacity(isDark ? 0.15 : 0.08)
-              : (isDark ? AppTheme.darkSidebar : Colors.grey.shade50),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor, width: isSelected ? 2 : 1),
+    return Container(
+      decoration: BoxDecoration(
+        color: isSelected
+            ? AppTheme.primaryAmber.withValues(alpha: 0.1)
+            : (isDark ? AppTheme.darkCardSurface : Colors.grey.shade50),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isSelected ? AppTheme.primaryAmber : (isDark ? AppTheme.darkBorder : Colors.grey.shade300),
+          width: isSelected ? 2 : 1,
         ),
-        child: Row(
+      ),
+      child: ListTile(
+        onTap: () => setState(() => _selectedTemplate = type),
+        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isSelected ? AppTheme.primaryAmber : null)),
+        subtitle: Text(desc, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.primaryAmber) : null,
+      ),
+    );
+  }
+
+  // ==========================================================================
+  // LAYAR 2B: PENAUTAN PERANGKAT KARYAWAN (STAGE 1 & STAGE 2)
+  // ==========================================================================
+
+  Widget _buildStaffPairingStage1(Color textColor, Color subTextColor, bool isDark) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Tombol Kembali
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() => _currentView = OnboardingView.welcomeGateway);
+            },
+            icon: const Icon(Icons.arrow_back_rounded, size: 16),
+            label: const Text('Kembali ke Pilihan Peran'),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Header Karyawan
+        Row(
           children: [
-            Radio<TemplateBusinessType>(
-              value: type,
-              groupValue: _selectedTemplate,
-              onChanged: (val) {
-                if (val != null) setState(() => _selectedTemplate = val);
-              },
-              activeColor: AppTheme.primaryAmber,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.emeraldGreen.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.badge_rounded, color: AppTheme.emeraldGreen, size: 28),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                      color: isSelected ? AppTheme.primaryAmber : null,
-                    ),
+                    'Tautkan HP Karyawan (Kasir / Dapur)',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
-                    desc,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.white60 : Colors.black54,
-                    ),
+                    'Hubungkan HP ini ke outlet toko tempat Anda bertugas',
+                    style: TextStyle(fontSize: 12, color: subTextColor),
                   ),
                 ],
               ),
             ),
           ],
         ),
+        const SizedBox(height: 24),
+
+        // Metode 1: Scan QR Kasir
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkCardSurface : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: isDark ? AppTheme.darkBorder : Colors.grey.shade200),
+          ),
+          child: Column(
+            children: [
+              const Icon(Icons.qr_code_scanner_rounded, size: 36, color: AppTheme.emeraldGreen),
+              const SizedBox(height: 8),
+              const Text('Metode Cepat: Pindai Kode QR Kasir', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text(
+                'Minta kasir utama membuka menu Kelola Kasir, lalu scan kode QR akun staf Anda.',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _showQrScanDialog,
+                icon: const Icon(Icons.camera_alt_rounded, size: 16),
+                label: const Text('Pindai Kode QR Kasir'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.emeraldGreen,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(44),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text('atau masukkan data manual', style: TextStyle(fontSize: 12, color: subTextColor)),
+            ),
+            Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
+          ],
+        ),
+        const SizedBox(height: 18),
+
+        // Metode 2: Input Resto ID & Username
+        TextField(
+          controller: _staffRestoIdController,
+          decoration: InputDecoration(
+            labelText: 'Resto ID Toko *',
+            hintText: 'contoh: samelona',
+            prefixIcon: const Icon(Icons.storefront_outlined),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        TextField(
+          controller: _staffUsernameController,
+          decoration: InputDecoration(
+            labelText: 'Username Karyawan Anda *',
+            hintText: 'contoh: lukman',
+            prefixIcon: const Icon(Icons.person_outline),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+
+        if (_staffErrorMessage != null) ...[
+          const SizedBox(height: 10),
+          Text(_staffErrorMessage!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+        ],
+
+        const SizedBox(height: 18),
+        ElevatedButton(
+          onPressed: _isLoading ? null : _verifyStaffStage1,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primaryAmber,
+            foregroundColor: Colors.black,
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: Text(_isLoading ? 'Memverifikasi...' : 'Lanjutkan ke Verifikasi PIN →', style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStaffPairingStage2(Color textColor, Color subTextColor, bool isDark) {
+    final staff = _verifiedStaffData?['staff'] as Map<String, dynamic>?;
+    final staffName = staff?['name'] ?? _staffUsernameController.text;
+    final staffRole = staff?['role'] ?? 'cashier';
+    final restoName = _verifiedStaffData?['restoName'] ?? _staffRestoIdController.text;
+    final isKitchen = staffRole == 'kitchen';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Tombol Kembali ke Stage 1
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() => _currentView = OnboardingView.staffPairingStage1);
+            },
+            icon: const Icon(Icons.arrow_back_rounded, size: 16),
+            label: const Text('Kembali ke Input ID'),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Banner Profil Karyawan Terdeteksi
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withValues(alpha: 0.3),
+            ),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withValues(alpha: 0.25),
+                child: Icon(
+                  isKitchen ? Icons.soup_kitchen_rounded : Icons.point_of_sale_rounded,
+                  color: isKitchen ? Colors.orange.shade800 : AppTheme.emeraldGreen,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(staffName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$restoName • ${isKitchen ? "Koki Dapur (KDS)" : "Kasir POS"}',
+                      style: TextStyle(fontSize: 12, color: isKitchen ? Colors.orange.shade800 : AppTheme.emeraldGreen, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        Center(
+          child: Column(
+            children: [
+              Text(
+                'Masukkan PIN Keamanan ($staffName)',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Masukkan 4 digit PIN yang dibuatkan Owner untuk mengunci HP ini',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // PIN Indicator Dots
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(4, (index) {
+            final isFilled = index < _staffPin.length;
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isFilled ? AppTheme.primaryAmber : Colors.transparent,
+                border: Border.all(
+                  color: isFilled ? AppTheme.primaryAmber : Colors.grey,
+                  width: 2,
+                ),
+              ),
+            );
+          }),
+        ),
+
+        if (_staffErrorMessage != null) ...[
+          const SizedBox(height: 12),
+          Center(child: Text(_staffErrorMessage!, style: const TextStyle(color: Colors.red, fontSize: 12))),
+        ],
+
+        const SizedBox(height: 20),
+
+        // Numpad Interaktif
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 260),
+            child: Column(
+              children: [
+                _buildNumpadRow(['1', '2', '3']),
+                const SizedBox(height: 8),
+                _buildNumpadRow(['4', '5', '6']),
+                const SizedBox(height: 8),
+                _buildNumpadRow(['7', '8', '9']),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildNumpadKey('C', isAction: true, onTap: () {
+                      if (_staffPin.isNotEmpty) {
+                        setState(() => _staffPin = _staffPin.substring(0, _staffPin.length - 1));
+                      }
+                    }),
+                    const SizedBox(width: 8),
+                    _buildNumpadKey('0', onTap: () => _appendPin('0')),
+                    const SizedBox(width: 8),
+                    _buildNumpadKey('OK', isAction: true, isConfirm: true, onTap: _pairStaffStage2),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 20),
+        ElevatedButton(
+          onPressed: (_isLoading || _staffPin.length < 4) ? null : _pairStaffStage2,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.emeraldGreen,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: Text(_isLoading ? 'Menautkan Perangkat...' : 'Kunci Perangkat ke Outlet Ini', style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNumpadRow(List<String> digits) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: digits.map((d) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: _buildNumpadKey(d, onTap: () => _appendPin(d)),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildNumpadKey(String label, {bool isAction = false, bool isConfirm = false, required VoidCallback onTap}) {
+    return SizedBox(
+      width: 70,
+      height: 48,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isConfirm
+              ? AppTheme.emeraldGreen
+              : (isAction ? Colors.grey.shade800 : Colors.grey.shade900),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          elevation: 0,
+          padding: EdgeInsets.zero,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: isAction ? 14 : 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
     );
+  }
+
+  void _appendPin(String digit) {
+    if (_staffPin.length < 4) {
+      setState(() {
+        _staffPin += digit;
+        _staffErrorMessage = null;
+      });
+      if (_staffPin.length == 4) {
+        // Otomatis picu penautan setelah 4 digit dimasukkan
+        _pairStaffStage2();
+      }
+    }
   }
 }
