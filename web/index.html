@@ -12,6 +12,9 @@
   <!-- Google OAuth 2.0 Web Client ID untuk Login Pemilik Resto -->
   <meta name="google-signin-client_id" content="59601017378-8esd6kvtamagkjjnm2q6qac94gblbooq.apps.googleusercontent.com">
 
+  <!-- Script Resmi Google Identity Services (GIS) SDK -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -26,20 +29,21 @@
 
   <style>
     body {
+      position: fixed;
+      inset: 0;
       margin: 0;
       padding: 0;
+      overflow: hidden;
       background-color: #0F172A;
       color: #F8FAFC;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      width: 100vw;
     }
 
     #loading-container {
+      position: fixed;
+      inset: 0;
+      z-index: 999999;
+      background-color: #0F172A;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -47,6 +51,7 @@
       text-align: center;
       gap: 16px;
       padding: 24px;
+      transition: opacity 0.3s ease-out;
     }
 
     .brand-icon {
@@ -203,6 +208,9 @@
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
+
+    // Fallback durasi maksimal (4 detik) agar splash screen tidak pernah memblokir layar jika frame telat
+    setTimeout(dismissAppSplash, 4000);
   </script>
 
   <script src="flutter_bootstrap.js" async></script>

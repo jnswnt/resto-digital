@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -362,9 +363,12 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                       ),
                                     );
                                     if (confirm == true && mounted) {
+                                      // Bersihkan sesi login Google agar tidak terjadi bentrok status otentikasi saat login ulang
+                                      await GoogleSignIn().signOut().catchError((_) => null);
                                       authProv.logout();
                                       await settingsProv.resetToOnboarding();
-                                      navigator.pop();
+                                      // Kembalikan route navigator hingga layar dasar onboarding (membersihkan seluruh stack Settings)
+                                      navigator.popUntil((route) => route.isFirst);
                                     }
                                   },
                                   icon: const Icon(Icons.swap_horiz_rounded, size: 14),

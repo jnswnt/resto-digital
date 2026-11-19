@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -89,13 +90,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _staffPin = '';
   String? _staffErrorMessage;
   Map<String, dynamic>? _verifiedStaffData;
+  StreamSubscription<GoogleSignInAccount?>? _googleAuthSubscription;
 
   @override
   void initState() {
     super.initState();
     _storeNameController.addListener(_onStoreNameChanged);
     // Dengarkan event autentikasi akun Google resmi (bekerja mulus via renderButton GIS Web & Mobile)
-    _googleSignIn.onCurrentUserChanged.listen((GoogleSignInAccount? account) {
+    _googleAuthSubscription = _googleSignIn.onCurrentUserChanged.listen((GoogleSignInAccount? account) {
       if (account != null && mounted) {
         _handleGoogleAccountAuthenticated(account);
       }
@@ -104,6 +106,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   void dispose() {
+    _googleAuthSubscription?.cancel();
     _storeNameController.removeListener(_onStoreNameChanged);
     _storeNameController.dispose();
     _restoIdController.dispose();
@@ -234,7 +237,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     try {
       final GoogleSignInAccount? account = await _googleSignIn.signIn().timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 15),
         onTimeout: () {
           debugPrint('[GoogleSignIn] Jendela login Google ditutup atau waktu habis.');
           return null;
@@ -252,6 +255,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       debugPrint('[GoogleSignIn] Kendala otentikasi: $e');
       if (mounted) {
         setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Kendala login Google: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     }
   }
@@ -1013,6 +1022,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             onPressed: () {
+              _googleSignIn.signOut().catchError((_) => null);
               setState(() {
                 _isLoading = false;
                 _currentView = OnboardingView.welcomeGateway;
@@ -1091,7 +1101,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Center(
                   child: TextButton.icon(
                     onPressed: () {
-                      _googleSignIn.signOut().catchError((_) {});
+                      _googleSignIn.signOut().catchError((_) => null);
                       setState(() => _isLoading = false);
                     },
                     icon: const Icon(Icons.close_rounded, size: 16, color: Colors.redAccent),
