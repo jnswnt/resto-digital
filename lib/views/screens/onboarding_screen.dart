@@ -91,6 +91,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String? _staffErrorMessage;
   Map<String, dynamic>? _verifiedStaffData;
   StreamSubscription<GoogleSignInAccount?>? _googleAuthSubscription;
+  bool _isProcessingGoogleAuth = false;
 
   @override
   void initState() {
@@ -155,6 +156,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   /// Memproses akun Google yang telah berhasil diautentikasi (baik via GIS Button Web maupun popup mobile)
   Future<void> _handleGoogleAccountAuthenticated(GoogleSignInAccount account) async {
+    // Mencegah race condition atau bentrok eksekusi ganda antara event listener stream dan pemanggilan signIn()
+    if (_isProcessingGoogleAuth) return;
+    _isProcessingGoogleAuth = true;
+
     final email = account.email;
     final name = account.displayName?.isNotEmpty == true
         ? account.displayName!
@@ -194,8 +199,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         });
 
         if (!isNew && rawTenants.isNotEmpty) {
-          // Owner memiliki outlet terdaftar: Tampilkan modal pilihan cabang
-          await _showOutletSelectionDialog(email, name, rawTenants);
+          if (rawTenants.length == 1) {
+            // Auto-Link Instan: Jika akun Google hanya terdaftar pada 1 outlet,
+            // langsung tautkan tablet kasir tanpa memunculkan dialog pemilihan cabang yang rawan terblokir
+            final firstRaw = rawTenants.first;
+            final singleTenant = firstRaw is Map
+                ? Map<String, dynamic>.from(firstRaw)
+                : <String, dynamic>{};
+            final rId = singleTenant['restoId']?.toString() ?? '';
+            final bName = singleTenant['businessName']?.toString() ?? rId;
+            await _linkExistingOwnerOutlet(rId, bName, email, singleTenant);
+          } else {
+            // Owner memiliki banyak cabang: Tampilkan modal pilihan cabang
+            await _showOutletSelectionDialog(email, name, rawTenants);
+          }
         } else {
           // Owner baru: Arahkan ke Wizard Pendaftaran Resto Baru
           setState(() {
@@ -228,6 +245,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         );
       }
     } finally {
+      _isProcessingGoogleAuth = false;
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -237,6 +255,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   /// Pemicu otentikasi resmi Google (Web & Android).
   /// Membuka popup otentikasi Google, dan jika terhalang browser menyediakan fallback penautan instan.
   Future<void> _handleGoogleSignIn() async {
+    if (_isProcessingGoogleAuth) return;
     setState(() => _isLoading = true);
 
     try {
@@ -254,14 +273,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (account != null) {
         await _handleGoogleAccountAuthenticated(account);
       } else {
-        if (mounted) {
+        if (mounted && !_isProcessingGoogleAuth) {
           setState(() => _isLoading = false);
           _showGoogleAuthFallbackDialog();
         }
       }
     } catch (e) {
       debugPrint('[GoogleSignIn] Kendala otentikasi: $e');
-      if (mounted) {
+      if (mounted && !_isProcessingGoogleAuth) {
         setState(() => _isLoading = false);
         _showGoogleAuthFallbackDialog(errorMessage: e.toString());
       }
@@ -362,7 +381,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         });
 
                         if (!isNew && rawTenants.isNotEmpty) {
-                          await _showOutletSelectionDialog(email, 'Pemilik Resto', rawTenants);
+                          if (rawTenants.length == 1) {
+                            final firstRaw = rawTenants.first;
+                            final singleTenant = firstRaw is Map
+                                ? Map<String, dynamic>.from(firstRaw)
+                                : <String, dynamic>{};
+                            final rId = singleTenant['restoId']?.toString() ?? '';
+                            final bName = singleTenant['businessName']?.toString() ?? rId;
+                            await _linkExistingOwnerOutlet(rId, bName, email, singleTenant);
+                          } else {
+                            await _showOutletSelectionDialog(email, 'Pemilik Resto', rawTenants);
+                          }
                         } else {
                           setState(() {
                             _wizardStep = 0;
@@ -477,7 +506,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         if (authRes != null && authRes['success'] == true) {
                           final rawTenants = authRes['tenants'] as List<dynamic>? ?? [];
                           if (rawTenants.isNotEmpty) {
-                            await _showOutletSelectionDialog(input, 'Pemilik Resto', rawTenants);
+                            if (rawTenants.length == 1) {
+                              final firstRaw = rawTenants.first;
+                              final singleTenant = firstRaw is Map
+                                  ? Map<String, dynamic>.from(firstRaw)
+                                  : <String, dynamic>{};
+                              final rId = singleTenant['restoId']?.toString() ?? '';
+                              final bName = singleTenant['businessName']?.toString() ?? rId;
+                              await _linkExistingOwnerOutlet(rId, bName, input, singleTenant);
+                            } else {
+                              await _showOutletSelectionDialog(input, 'Pemilik Resto', rawTenants);
+                            }
                           } else {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -567,9 +606,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   itemCount: tenants.length,
                   separatorBuilder: (context, index) => const SizedBox(height: 8),
                   itemBuilder: (ctx, index) {
-                    final t = tenants[index] as Map<String, dynamic>;
-                    final bName = t['businessName'] ?? t['restoId'];
-                    final rId = t['restoId'] ?? '';
+                    final itemRaw = tenants[index];
+                    final t = itemRaw is Map
+                        ? Map<String, dynamic>.from(itemRaw)
+                        : <String, dynamic>{};
+                    final bName = t['businessName']?.toString() ?? t['restoId']?.toString() ?? 'Outlet';
+                    final rId = t['restoId']?.toString() ?? '';
                     final daysLeft = t['daysLeft'] ?? 14;
                     final isExp = t['isExpired'] == true;
 
@@ -658,22 +700,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       List<UserModel>? staffList;
 
       if (details != null && details['success'] == true) {
-        final catalog = details['catalog'] as Map<String, dynamic>?;
+        final catalogRaw = details['catalog'];
+        final catalog = catalogRaw is Map ? Map<String, dynamic>.from(catalogRaw) : null;
         if (catalog != null) {
           final rawCats = catalog['categories'] as List<dynamic>? ?? [];
           final rawProds = catalog['products'] as List<dynamic>? ?? [];
 
           categories = rawCats.map<CategoryModel>((c) {
-            if (c is Map<String, dynamic>) {
-              return CategoryModel.fromMap(c);
+            if (c is Map) {
+              return CategoryModel.fromMap(Map<String, dynamic>.from(c));
             }
             final cName = c.toString();
             return CategoryModel(id: cName.toLowerCase(), name: cName, sortOrder: 0);
           }).toList();
 
           products = rawProds.map<ProductModel>((p) {
-            if (p is Map<String, dynamic>) {
-              return ProductModel.fromMap(p);
+            if (p is Map) {
+              return ProductModel.fromMap(Map<String, dynamic>.from(p));
             }
             return ProductModel(
               id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
@@ -687,7 +730,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
         final rawStaff = details['staff'] as List<dynamic>? ?? [];
         if (rawStaff.isNotEmpty) {
-          staffList = rawStaff.map<UserModel>((s) => UserModel.fromMap(s as Map<String, dynamic>)).toList();
+          staffList = rawStaff.map<UserModel>((s) {
+            final sMap = s is Map ? Map<String, dynamic>.from(s) : <String, dynamic>{};
+            return UserModel.fromMap(sMap);
+          }).toList();
         }
       }
 
@@ -695,11 +741,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         restoId: targetRestoId,
         storeName: businessName,
         ownerEmail: ownerEmail,
-        businessType: tenantData['businessType'] ?? 'cafe',
-        address: tenantData['address'] ?? '',
-        phoneWA: tenantData['phone'] ?? '',
-        subscriptionStatus: tenantData['subscriptionStatus'] ?? 'trial',
-        trialExpiresAt: tenantData['trialExpiresAt'],
+        businessType: tenantData['businessType']?.toString() ?? 'cafe',
+        address: tenantData['address']?.toString() ?? '',
+        phoneWA: tenantData['phone']?.toString() ?? '',
+        subscriptionStatus: tenantData['subscriptionStatus']?.toString() ?? 'trial',
+        trialExpiresAt: tenantData['trialExpiresAt']?.toString(),
         categories: categories,
         products: products,
         staff: staffList,
@@ -708,14 +754,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       posProv.loadData();
       onlineOrderProv.syncWithSettings(settingsProv.settings);
 
-      // Otomatis aktifkan user owner jika tersedia
-      if (staffList != null && staffList.isNotEmpty) {
-        final ownerUser = staffList.firstWhere(
-          (u) => u.isOwner,
-          orElse: () => staffList!.first,
-        );
-        authProv.setActiveUser(ownerUser);
-      }
+      // Pastikan ada akun Owner aktif untuk login dan operasional tablet kasir
+      final currentUsers = settingsProv.users;
+      final ownerUser = currentUsers.firstWhere(
+        (u) => u.isOwner,
+        orElse: () => currentUsers.isNotEmpty
+            ? currentUsers.first
+            : UserModel(
+                id: 'user_owner',
+                name: businessName,
+                role: 'owner',
+                pinHash: AuthService.hashPin('9999', AuthService.generateSalt()),
+                salt: '',
+                isActive: true,
+              ),
+      );
+      // Aktifkan sesi login Owner secara langsung agar kasir tidak terlempar ke layar kunci kosong
+      authProv.setActiveUser(ownerUser);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -727,6 +782,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         );
       }
     } catch (e) {
+      debugPrint('[LinkOutlet] Gagal menautkan outlet: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Gagal menautkan outlet: $e'), backgroundColor: Colors.red),
@@ -1373,6 +1429,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Center(
                   child: TextButton.icon(
                     onPressed: () {
+                      _isProcessingGoogleAuth = false;
                       _googleSignIn.signOut().catchError((_) => null);
                       setState(() => _isLoading = false);
                     },

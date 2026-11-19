@@ -609,7 +609,29 @@ class StorageService {
     List<ProductModel>? products,
     List<UserModel>? staff,
   }) async {
-    // 1. Simpan pengaturan resto
+    // 1. Simpan staf jika ada dari server, atau pastikan akun Owner default tersedia
+    final existingUsers = getUsers();
+    List<UserModel> effectiveStaff = (staff != null && staff.isNotEmpty)
+        ? List<UserModel>.from(staff)
+        : List<UserModel>.from(existingUsers);
+
+    if (!effectiveStaff.any((u) => u.isOwner)) {
+      final ownerSalt = AuthService.generateSalt();
+      final defaultOwner = UserModel(
+        id: 'user_owner',
+        name: '$storeName (Owner)',
+        username: 'owner',
+        role: 'owner',
+        pinHash: AuthService.hashPin('9999', ownerSalt),
+        salt: ownerSalt,
+        isActive: true,
+      );
+      effectiveStaff = [defaultOwner, ...effectiveStaff];
+    }
+    await saveUsers(effectiveStaff);
+
+    // 2. Simpan pengaturan resto (pastikan master Owner PIN hash tersimpan)
+    final currentOwner = effectiveStaff.firstWhere((u) => u.isOwner);
     final currentSettings = getSettings();
     final newSettings = currentSettings.copyWith(
       storeName: storeName,
@@ -621,13 +643,14 @@ class StorageService {
       isOnboarded: true,
       subscriptionStatus: subscriptionStatus ?? 'trial',
       trialExpiresAt: trialExpiresAt,
+      ownerPinHash: currentSettings.ownerPinHash.isNotEmpty
+          ? currentSettings.ownerPinHash
+          : currentOwner.pinHash,
+      ownerSalt: currentSettings.ownerSalt.isNotEmpty
+          ? currentSettings.ownerSalt
+          : currentOwner.salt,
     );
     await saveSettings(newSettings);
-
-    // 2. Simpan staf jika ada dari server
-    if (staff != null && staff.isNotEmpty) {
-      await saveUsers(staff);
-    }
 
     // 3. Simpan kategori & produk jika ada dari server
     if (categories != null && categories.isNotEmpty) {
