@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mini_resto_pos/models/user_model.dart';
+import 'package:mini_resto_pos/services/auth_service.dart';
 import 'package:mini_resto_pos/services/cloud_sync_service.dart';
 import 'package:mini_resto_pos/services/database_helper.dart';
 import 'package:mini_resto_pos/services/onboarding_template_service.dart';
@@ -151,6 +153,110 @@ void main() {
       // Menu harus 0 (bersih tanpa dummy sama sekali)
       expect(storage.getCategories().isEmpty, isTrue);
       expect(storage.getProducts().isEmpty, isTrue);
+    });
+
+    test('Simulasi Penautan HP Karyawan (Lukman Koki Dapur - Toko Samelona)', () async {
+      final salt = AuthService.generateSalt();
+      final pinHash = AuthService.hashPin('5555', salt);
+
+      final mockClient = MockClient((request) async {
+        // Stage 1: Verifikasi Resto ID & Username
+        if (request.url.path == '/api/tenants/samelona/staff/verify') {
+          final body = jsonDecode(request.body);
+          if (body['username'] == 'lukman') {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'restoId': 'samelona',
+                'restoName': 'Toko Samelona',
+                'staff': {
+                  'id': 'user_lukman',
+                  'name': 'Lukman',
+                  'username': 'lukman',
+                  'role': 'kitchen',
+                  'salt': salt,
+                },
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response(jsonEncode({'error': 'Karyawan tidak ditemukan'}), 404);
+        }
+
+        // Stage 2: Verifikasi PIN & Pairing
+        if (request.url.path == '/api/tenants/samelona/staff/pair') {
+          final body = jsonDecode(request.body);
+          if (body['username'] == 'lukman' && body['pinHash'] == pinHash) {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'message': 'Perangkat berhasil ditautkan ke Toko Samelona',
+                'restoId': 'samelona',
+                'restoName': 'Toko Samelona',
+                'staff': {
+                  'id': 'user_lukman',
+                  'name': 'Lukman',
+                  'username': 'lukman',
+                  'role': 'kitchen',
+                  'pinHash': pinHash,
+                  'salt': salt,
+                },
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response(jsonEncode({'error': 'PIN salah'}), 401);
+        }
+
+        return http.Response('Not Found', 404);
+      });
+
+      final cloudSync = CloudSyncService(client: mockClient, restoId: 'samelona');
+
+      // 1. Uji Stage 1: Lukman masukkan Resto ID: samelona & Username: lukman
+      final verify = await cloudSync.verifyStaffDevice(restoId: 'samelona', username: 'lukman');
+      expect(verify, isNotNull);
+      expect(verify!['success'], isTrue);
+      expect(verify['staff']['role'], 'kitchen');
+
+      // 2. Uji Stage 2: Lukman masukkan PIN 5555
+      final pair = await cloudSync.pairStaffDevice(
+        restoId: 'samelona',
+        username: 'lukman',
+        pinHash: pinHash,
+      );
+      expect(pair, isNotNull);
+      expect(pair!['success'], isTrue);
+
+      // 3. Simpan konfigurasi ke HP Lukman secara lokal
+      final storage = await StorageService.init(dbHelper: dbHelper);
+      final staffUser = UserModel(
+        id: pair['staff']['id'],
+        name: pair['staff']['name'],
+        username: pair['staff']['username'],
+        role: pair['staff']['role'],
+        pinHash: pinHash,
+        salt: salt,
+      );
+
+      await storage.pairStaffDevice(
+        restoId: 'samelona',
+        storeName: 'Toko Samelona',
+        staffUser: staffUser,
+      );
+
+      // 4. Verifikasi status HP Lukman sekarang
+      final settings = storage.getSettings();
+      expect(settings.restoId, 'samelona');
+      expect(settings.storeName, 'Toko Samelona');
+      expect(settings.isOnboarded, isTrue); // HP Lukman resmi tertaut!
+
+      final users = storage.getUsers();
+      expect(users.length, 1);
+      expect(users.first.name, 'Lukman');
+      expect(users.first.isKitchen, isTrue); // Terdeteksi sebagai Koki Dapur!
     });
   });
 }

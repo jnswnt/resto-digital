@@ -3,6 +3,7 @@
 class UserModel {
   final String id;
   final String name;
+  final String username; // Username penautan perangkat (contoh: 'lukman')
   final String role; // 'cashier', 'kitchen' / 'staff', atau 'owner'
   final String pinHash;
   final String salt;
@@ -12,12 +13,16 @@ class UserModel {
   UserModel({
     required this.id,
     required this.name,
+    String? username,
     required this.role,
     required this.pinHash,
     required this.salt,
     this.isActive = true,
     DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
+  })  : username = username != null && username.isNotEmpty
+            ? username.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')
+            : name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ''),
+        createdAt = createdAt ?? DateTime.now();
 
   bool get isOwner => role == 'owner';
   bool get isCashier => role == 'cashier';
@@ -28,6 +33,7 @@ class UserModel {
     return {
       'id': id,
       'name': name,
+      'username': username,
       'role': role,
       'pinHash': pinHash,
       'salt': salt,
@@ -37,9 +43,12 @@ class UserModel {
   }
 
   factory UserModel.fromMap(Map<String, dynamic> map) {
+    final nameVal = map['name'] ?? '';
     return UserModel(
       id: map['id'] ?? '',
-      name: map['name'] ?? '',
+      name: nameVal,
+      username: map['username'] ??
+          nameVal.toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ''),
       role: map['role'] ?? 'cashier',
       pinHash: map['pinHash'] ?? '',
       salt: map['salt'] ?? '',
@@ -53,6 +62,7 @@ class UserModel {
   UserModel copyWith({
     String? id,
     String? name,
+    String? username,
     String? role,
     String? pinHash,
     String? salt,
@@ -62,6 +72,7 @@ class UserModel {
     return UserModel(
       id: id ?? this.id,
       name: name ?? this.name,
+      username: username ?? this.username,
       role: role ?? this.role,
       pinHash: pinHash ?? this.pinHash,
       salt: salt ?? this.salt,

@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
+import '../models/category_model.dart';
+import '../models/product_model.dart';
 import '../models/settings_model.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
@@ -300,6 +302,25 @@ class SettingsProvider with ChangeNotifier {
   /// Mereset kembali ke mode onboarding untuk pendaftaran tenant baru
   Future<void> resetToOnboarding() async {
     await _storageService.resetToOnboarding();
+    loadSettings();
+    loadUsers();
+  }
+
+  /// Memasangkan perangkat staf karyawan (misal: HP Dapur Lukman) ke outlet
+  Future<void> pairStaffDevice({
+    required String restoId,
+    required String storeName,
+    required UserModel staffUser,
+    List<CategoryModel>? categories,
+    List<ProductModel>? products,
+  }) async {
+    await _storageService.pairStaffDevice(
+      restoId: restoId,
+      storeName: storeName,
+      staffUser: staffUser,
+      categories: categories,
+      products: products,
+    );
     loadSettings();
     loadUsers();
   }

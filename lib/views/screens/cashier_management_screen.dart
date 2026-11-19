@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../providers/settings_provider.dart';
 import '../../models/user_model.dart';
+import '../../services/cloud_sync_service.dart';
 import '../../theme/app_theme.dart';
 
 /// Halaman Sub Menu Khusus: Manajemen Akun Staf (Kasir & Koki Dapur)
@@ -319,10 +322,18 @@ class CashierManagementScreen extends StatelessWidget {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        IconButton(
+                          icon: const Icon(Icons.qr_code_2_rounded, size: 22, color: AppTheme.primaryAmber),
+                          tooltip: 'Tautkan HP Karyawan (Kode QR)',
+                          onPressed: () => _showPairingQrDialog(context, provider, staff),
+                        ),
                         Switch(
                           value: staff.isActive,
                           activeThumbColor: AppTheme.emeraldGreen,
-                          onChanged: (val) => provider.toggleCashierStatus(staff.id, val),
+                          onChanged: (val) {
+                            provider.toggleCashierStatus(staff.id, val);
+                            CloudSyncService(restoId: provider.settings.restoId).syncStaffToCloud(provider.allStaff);
+                          },
                         ),
                         IconButton(
                           icon: const Icon(Icons.edit_outlined, size: 18),
@@ -344,6 +355,7 @@ class CashierManagementScreen extends StatelessWidget {
                                     onPressed: () async {
                                       Navigator.pop(ctx);
                                       await provider.deleteCashier(staff.id);
+                                      CloudSyncService(restoId: provider.settings.restoId).syncStaffToCloud(provider.allStaff);
                                     },
                                     style: ElevatedButton.styleFrom(backgroundColor: AppTheme.dangerRed),
                                     child: const Text('Hapus'),
@@ -359,6 +371,104 @@ class CashierManagementScreen extends StatelessWidget {
                 );
               },
             ),
+    );
+  }
+
+  /// Menampilkan dialog Kode QR untuk ditautkan oleh HP Karyawan
+  void _showPairingQrDialog(BuildContext context, SettingsProvider provider, UserModel staff) {
+    final restoId = provider.settings.restoId;
+    final storeName = provider.settings.storeName;
+    final pairingPayload = jsonEncode({
+      'action': 'pair_device',
+      'restoId': restoId,
+      'storeName': storeName,
+      'username': staff.username,
+      'name': staff.name,
+      'role': staff.role,
+    });
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2_rounded, color: AppTheme.primaryAmber, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Tautkan HP ${staff.name}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(staff.isKitchen ? 'Role: Koki Dapur (KDS)' : 'Role: Kasir POS', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Arahkan kamera HP karyawan ke kode QR ini dari layar penautan perangkat untuk menghubungkan HP mereka secara instan.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)],
+              ),
+              child: QrImageView(
+                data: pairingPayload,
+                version: QrVersions.auto,
+                size: 200,
+                backgroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Resto ID:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      Text(restoId, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Username:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      Text(staff.username, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryAmber,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
     );
   }
 }

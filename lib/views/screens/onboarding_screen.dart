@@ -1,11 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../models/settings_model.dart';
+import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/online_order_provider.dart';
 import '../../providers/pos_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../services/auth_service.dart';
 import '../../services/cloud_sync_service.dart';
 import '../../services/onboarding_template_service.dart';
 import '../../theme/app_theme.dart';
@@ -358,7 +361,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             onPressed: _showConnectExistingDialog,
                             icon: const Icon(Icons.link_rounded, size: 16),
                             label: const Text(
-                              'Sudah punya outlet terdaftar? Hubungkan Resto ID di sini',
+                              'Sudah punya outlet? Tautkan HP Karyawan (Kasir / Dapur) di sini',
                               style: TextStyle(fontSize: 13),
                             ),
                           ),
@@ -375,119 +378,351 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  /// Dialog untuk menautkan perangkat ke outlet yang sudah terdaftar di server
+  /// Dialog 2 Tahap untuk menautkan perangkat karyawan (Kasir/Dapur) ke outlet terdaftar
   Future<void> _showConnectExistingDialog() async {
     final restoIdCtrl = TextEditingController();
-    final ownerPinCtrl = TextEditingController(text: '9999');
-    bool isConnecting = false;
+    final usernameCtrl = TextEditingController();
+    final pinCtrl = TextEditingController();
+
+    int pairingStage = 1; // 1: Input Resto ID & Username, 2: Input PIN Keamanan
+    bool isProcessing = false;
     String? errorMsg;
+    Map<String, dynamic>? verifiedStaffData;
 
     await showDialog(
       context: context,
+      barrierDismissible: !isProcessing,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) {
+          final isKitchen = verifiedStaffData?['staff']?['role'] == 'kitchen';
+          final staffName = verifiedStaffData?['staff']?['name'] ?? '';
+          final restoName = verifiedStaffData?['restoName'] ?? '';
+
           return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: Row(
-              children: const [
-                Icon(Icons.link_rounded, color: AppTheme.primaryAmber),
-                SizedBox(width: 8),
-                Text('Hubungkan ke Outlet yang Ada'),
+              children: [
+                Icon(
+                  pairingStage == 1 ? Icons.phonelink_setup_rounded : Icons.shield_outlined,
+                  color: AppTheme.primaryAmber,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  pairingStage == 1 ? 'Tautkan Perangkat Karyawan' : 'Verifikasi PIN Keamanan',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ],
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Masukkan Resto ID outlet yang sudah dibuat sebelumnya untuk menautkan perangkat ini.',
-                  style: TextStyle(fontSize: 12),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (pairingStage == 1) ...[
+                      const Text(
+                        'Masukkan Resto ID toko dan Username Anda untuk menautkan HP ini ke sistem outlet.',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: restoIdCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Resto ID *',
+                          hintText: 'contoh: samelona',
+                          prefixIcon: const Icon(Icons.storefront_outlined),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: usernameCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Username Karyawan *',
+                          hintText: 'contoh: lukman',
+                          prefixIcon: const Icon(Icons.person_outline),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          // Dialog input payload QR scan dari tablet kasir
+                          final qrInputCtrl = TextEditingController();
+                          final qrResult = await showDialog<String>(
+                            context: context,
+                            builder: (qCtx) => AlertDialog(
+                              title: const Text('Pindai / Tempel Kode QR Kasir', style: TextStyle(fontSize: 15)),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('Arahkan kamera ke QR tablet kasir atau tempel teks kode QR:', style: TextStyle(fontSize: 12)),
+                                  const SizedBox(height: 12),
+                                  TextField(
+                                    controller: qrInputCtrl,
+                                    decoration: const InputDecoration(
+                                      hintText: '{"restoId":"samelona","username":"lukman"}',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(qCtx), child: const Text('Batal')),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.pop(qCtx, qrInputCtrl.text.trim()),
+                                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryAmber, foregroundColor: Colors.black),
+                                  child: const Text('Gunakan'),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (qrResult != null && qrResult.isNotEmpty) {
+                            try {
+                              final parsed = jsonDecode(qrResult);
+                              if (parsed['restoId'] != null) {
+                                restoIdCtrl.text = parsed['restoId'];
+                              }
+                              if (parsed['username'] != null) {
+                                usernameCtrl.text = parsed['username'];
+                              }
+                            } catch (_) {
+                              // Plain string parsing fallback
+                              if (qrResult.contains('|')) {
+                                final parts = qrResult.split('|');
+                                restoIdCtrl.text = parts[0];
+                                if (parts.length > 1) usernameCtrl.text = parts[1];
+                              }
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
+                        label: const Text('Pindai Kode QR dari Tablet Kasir', style: TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(40),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ] else ...[
+                      // Stage 2: Profil Karyawan Terverifikasi & Input PIN
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: (isKitchen ? Colors.orange : AppTheme.emeraldGreen).withOpacity(0.2),
+                              child: Icon(
+                                isKitchen ? Icons.soup_kitchen_rounded : Icons.person_rounded,
+                                color: isKitchen ? Colors.orange.shade800 : AppTheme.emeraldGreen,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    staffName,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '$restoName • ${isKitchen ? "Koki Dapur (KDS)" : "Kasir POS"}',
+                                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Masukkan PIN rahasia Anda ($staffName) untuk mengonfirmasi kepemilikan perangkat ini:',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: pinCtrl,
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        obscureText: true,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: InputDecoration(
+                          labelText: 'PIN Keamanan (4–6 Digit) *',
+                          hintText: '••••',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ],
+                    if (errorMsg != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        errorMsg!,
+                        style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: restoIdCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Resto ID *',
-                    hintText: 'contoh: kopi-senja',
-                    prefixIcon: Icon(Icons.storefront_outlined),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: ownerPinCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'PIN Owner',
-                    hintText: '9999',
-                    prefixIcon: Icon(Icons.lock_outline),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                if (errorMsg != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    errorMsg!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12),
-                  ),
-                ],
-              ],
+              ),
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Batal'),
-              ),
+              if (pairingStage == 2)
+                TextButton(
+                  onPressed: isProcessing
+                      ? null
+                      : () => setDlgState(() {
+                            pairingStage = 1;
+                            errorMsg = null;
+                          }),
+                  child: const Text('Ganti Akun'),
+                )
+              else
+                TextButton(
+                  onPressed: isProcessing ? null : () => Navigator.pop(ctx),
+                  child: const Text('Batal'),
+                ),
               ElevatedButton(
-                onPressed: isConnecting
+                onPressed: isProcessing
                     ? null
                     : () async {
                         final rid = restoIdCtrl.text.trim().toLowerCase();
-                        if (rid.isEmpty) {
-                          setDlgState(() => errorMsg = 'Resto ID tidak boleh kosong');
-                          return;
-                        }
+                        final uname = usernameCtrl.text.trim().toLowerCase();
 
-                        setDlgState(() {
-                          isConnecting = true;
-                          errorMsg = null;
-                        });
+                        if (pairingStage == 1) {
+                          if (rid.isEmpty || uname.isEmpty) {
+                            setDlgState(() => errorMsg = 'Resto ID dan Username wajib diisi');
+                            return;
+                          }
 
-                        try {
-                          final settingsProv = context.read<SettingsProvider>();
-                          final posProv = context.read<PosProvider>();
-                          final onlineOrderProv = context.read<OnlineOrderProvider>();
-                          final authProv = context.read<AuthProvider>();
+                          setDlgState(() {
+                            isProcessing = true;
+                            errorMsg = null;
+                          });
 
-                          await settingsProv.setupNewTenant(
-                            storeName: 'Restoran $rid',
+                          final cloudSync = CloudSyncService(
+                            serverUrl: CloudSyncService.defaultServerUrl,
                             restoId: rid,
-                            businessType: 'cafe',
-                            address: 'Cabang Terhubung',
-                            phoneWA: '',
-                            ownerName: 'Owner',
-                            ownerPin: ownerPinCtrl.text.trim().isNotEmpty ? ownerPinCtrl.text.trim() : '9999',
-                            cashierName: 'Kasir',
-                            cashierPin: '1234',
-                            templateType: TemplateBusinessType.blank,
                           );
 
-                          posProv.loadData();
-                          onlineOrderProv.syncWithSettings(settingsProv.settings);
-                          await authProv.loginWithPin(ownerPinCtrl.text.trim().isNotEmpty ? ownerPinCtrl.text.trim() : '9999');
+                          final verifyResult = await cloudSync.verifyStaffDevice(
+                            restoId: rid,
+                            username: uname,
+                          );
 
-                          if (ctx.mounted) Navigator.pop(ctx);
-                        } catch (e) {
+                          if (verifyResult != null && verifyResult['success'] == true) {
+                            setDlgState(() {
+                              isProcessing = false;
+                              verifiedStaffData = verifyResult;
+                              pairingStage = 2; // Berpindah ke Stage 2 (Verifikasi PIN)
+                            });
+                          } else {
+                            setDlgState(() {
+                              isProcessing = false;
+                              errorMsg = cloudSync.lastError ?? 'Karyawan tidak ditemukan di outlet ini.';
+                            });
+                          }
+                        } else {
+                          // Stage 2: Validasi PIN & Simpan Pairing
+                          final pin = pinCtrl.text.trim();
+                          if (pin.length < 4) {
+                            setDlgState(() => errorMsg = 'PIN minimal 4 digit angka');
+                            return;
+                          }
+
                           setDlgState(() {
-                            isConnecting = false;
-                            errorMsg = 'Gagal menghubungkan: $e';
+                            isProcessing = true;
+                            errorMsg = null;
                           });
+
+                          final cloudSync = CloudSyncService(
+                            serverUrl: CloudSyncService.defaultServerUrl,
+                            restoId: rid,
+                          );
+
+                          final staffSalt = verifiedStaffData?['staff']?['salt'] ?? '';
+                          final pinHash = AuthService.hashPin(pin, staffSalt);
+
+                          final pairResult = await cloudSync.pairStaffDevice(
+                            restoId: rid,
+                            username: uname,
+                            pinHash: pinHash,
+                          );
+
+                          if (pairResult != null && pairResult['success'] == true) {
+                            final settingsProv = context.read<SettingsProvider>();
+                            final posProv = context.read<PosProvider>();
+                            final onlineOrderProv = context.read<OnlineOrderProvider>();
+                            final authProv = context.read<AuthProvider>();
+
+                            final staffMap = pairResult['staff'] as Map<String, dynamic>;
+                            final staffUser = UserModel(
+                              id: staffMap['id'] ?? 'user_$uname',
+                              name: staffMap['name'] ?? staffName,
+                              username: staffMap['username'] ?? uname,
+                              role: staffMap['role'] ?? 'cashier',
+                              pinHash: pinHash,
+                              salt: staffSalt,
+                              isActive: true,
+                            );
+
+                            // Simpan konfigurasi penautan perangkat permanen
+                            await settingsProv.pairStaffDevice(
+                              restoId: rid,
+                              storeName: pairResult['restoName'] ?? restoName,
+                              staffUser: staffUser,
+                            );
+
+                            posProv.loadData();
+                            onlineOrderProv.syncWithSettings(settingsProv.settings);
+
+                            // Otomatis login dengan PIN karyawan
+                            await authProv.loginWithPin(pin);
+
+                            if (ctx.mounted) Navigator.pop(ctx);
+
+                            if (context.mounted) {
+                              final roleTitle = staffUser.isKitchen ? 'Koki Dapur (KDS)' : 'Kasir POS';
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    '🎉 HP Anda resmi tertaut ke ${pairResult["restoName"]} sebagai $roleTitle (${staffUser.name})!',
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  backgroundColor: AppTheme.emeraldGreen,
+                                  duration: const Duration(seconds: 4),
+                                ),
+                              );
+                            }
+                          } else {
+                            setDlgState(() {
+                              isProcessing = false;
+                              errorMsg = cloudSync.lastError ?? 'PIN keamanan salah.';
+                            });
+                          }
                         }
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryAmber,
                   foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                child: Text(isConnecting ? 'Menghubungkan...' : 'Hubungkan Outlet'),
+                child: Text(
+                  isProcessing
+                      ? 'Memproses...'
+                      : (pairingStage == 1 ? 'Lanjutkan' : 'Verifikasi & Tautkan HP'),
+                ),
               ),
             ],
           );

@@ -519,4 +519,37 @@ class StorageService {
     final reset = current.copyWith(isOnboarded: false);
     await saveSettings(reset);
   }
+
+  /// Mengonfigurasi perangkat karyawan (misal: HP Dapur Lukman) setelah berhasil dipasangkan (pairing)
+  Future<void> pairStaffDevice({
+    required String restoId,
+    required String storeName,
+    required UserModel staffUser,
+    List<CategoryModel>? categories,
+    List<ProductModel>? products,
+  }) async {
+    // 1. Simpan akun karyawan yang dipasangkan
+    await saveUsers([staffUser]);
+
+    // 2. Simpan identitas resto
+    final currentSettings = getSettings();
+    final newSettings = currentSettings.copyWith(
+      storeName: storeName,
+      restoId: restoId,
+      isOnboarded: true,
+      subscriptionStatus: 'trial',
+    );
+    await saveSettings(newSettings);
+
+    // 3. Simpan kategori & produk jika tersedia dari server
+    if (categories != null && categories.isNotEmpty) {
+      await saveCategories(categories);
+    }
+    if (products != null && products.isNotEmpty) {
+      await saveProducts(products);
+    }
+
+    // 4. Muat ulang seluruh cache dari database lokal
+    await reloadFromDatabase();
+  }
 }

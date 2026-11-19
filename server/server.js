@@ -97,14 +97,17 @@ function readRestoData(restoId) {
       catalog: { categories: [], products: [] },
       orders: [],
       waiterCalls: [],
+      staff: [],
     };
   }
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    if (!data.staff) data.staff = [];
+    return data;
   } catch (error) {
     console.error(`Gagal membaca data resto [${restoId}]:`, error);
-    return { restoId, catalog: { categories: [], products: [] }, orders: [], waiterCalls: [] };
+    return { restoId, catalog: { categories: [], products: [] }, orders: [], waiterCalls: [], staff: [] };
   }
 }
 
@@ -587,6 +590,148 @@ app.get('/api/tenants', (req, res) => {
     success: true,
     totalTenants: tenants.length,
     tenants: tenants,
+  });
+});
+
+// ============================================================================
+// MANAJEMEN PENAUTAN PERANGKAT KARYAWAN (DEVICE PAIRING & VERIFIKASI PIN)
+// ============================================================================
+
+/**
+ * POST /api/tenants/:restoId/staff/sync
+ * Tablet kasir utama (Owner) menyinkronkan daftar staf karyawan ke cloud SaaS.
+ */
+app.post('/api/tenants/:restoId/staff/sync', (req, res) => {
+  const { restoId } = req.params;
+  const { staff } = req.body;
+
+  if (!staff || !Array.isArray(staff)) {
+    return res.status(400).json({ error: 'Data staff (array) wajib disertakan.' });
+  }
+
+  const sanitizedId = String(restoId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const restoData = readRestoData(sanitizedId);
+
+  restoData.staff = staff.map((s) => ({
+    id: s.id,
+    name: s.name,
+    username: s.username || s.name.toLowerCase().replace(/[^a-z0-9]/g, ''),
+    role: s.role || 'cashier',
+    pinHash: s.pinHash,
+    salt: s.salt,
+    isActive: s.isActive !== undefined ? s.isActive : true,
+    updatedAt: new Date().toISOString(),
+  }));
+
+  saveRestoData(sanitizedId, restoData);
+  console.log(`[Staff] Sinkronisasi ${restoData.staff.length} staf untuk resto ${sanitizedId}`);
+
+  return res.json({
+    success: true,
+    message: 'Data staf berhasil disinkronkan ke server.',
+    staffCount: restoData.staff.length,
+  });
+});
+
+/**
+ * POST /api/tenants/:restoId/staff/verify
+ * HP Karyawan (misal Lukman) memeriksa apakah Resto ID & Username valid sebelum memasukkan PIN.
+ */
+app.post('/api/tenants/:restoId/staff/verify', (req, res) => {
+  const { restoId } = req.params;
+  const { username } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: 'Username wajib disertakan.' });
+  }
+
+  const sanitizedId = String(restoId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const restoData = readRestoData(sanitizedId);
+
+  const cleanUser = String(username).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const staffList = restoData.staff || [];
+
+  const user = staffList.find((s) => {
+    const sUsername = (s.username || s.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sName = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return sUsername === cleanUser || sName.includes(cleanUser) || cleanUser.includes(sUsername);
+  });
+
+  if (!user || user.isActive === false) {
+    return res.status(404).json({
+      error: `Karyawan '${username}' tidak ditemukan di outlet '${restoData.name}' atau statusnya nonaktif.`,
+      restoId: sanitizedId,
+      restoName: restoData.name,
+    });
+  }
+
+  console.log(`[Staff] Verifikasi awal staf berhasil: ${user.name} (${user.role}) di resto ${sanitizedId}`);
+
+  return res.json({
+    success: true,
+    restoId: sanitizedId,
+    restoName: restoData.name,
+    staff: {
+      id: user.id,
+      name: user.name,
+      username: user.username || cleanUser,
+      role: user.role,
+      salt: user.salt,
+    },
+  });
+});
+
+/**
+ * POST /api/tenants/:restoId/staff/pair
+ * HP Karyawan mengirimkan verifikasi PIN keamanan untuk resmi mengunci & menautkan perangkat ke outlet.
+ */
+app.post('/api/tenants/:restoId/staff/pair', (req, res) => {
+  const { restoId } = req.params;
+  const { username, pinHash } = req.body;
+
+  if (!username || !pinHash) {
+    return res.status(400).json({ error: 'Username dan pinHash wajib disertakan.' });
+  }
+
+  const sanitizedId = String(restoId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const restoData = readRestoData(sanitizedId);
+
+  const cleanUser = String(username).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const staffList = restoData.staff || [];
+
+  const user = staffList.find((s) => {
+    const sUsername = (s.username || s.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sName = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return sUsername === cleanUser || sName.includes(cleanUser);
+  });
+
+  if (!user || user.isActive === false) {
+    return res.status(404).json({ error: 'Karyawan tidak ditemukan.' });
+  }
+
+  if (user.pinHash !== pinHash) {
+    return res.status(401).json({ error: 'PIN keamanan salah. Silakan periksa kembali PIN Anda.' });
+  }
+
+  console.log(`[Pairing] HP Karyawan resmi tertaut: ${user.name} (${user.role}) di resto ${sanitizedId}`);
+
+  return res.json({
+    success: true,
+    message: `Perangkat berhasil ditautkan ke ${restoData.name}`,
+    restoId: sanitizedId,
+    restoName: restoData.name,
+    staff: {
+      id: user.id,
+      name: user.name,
+      username: user.username || cleanUser,
+      role: user.role,
+      pinHash: user.pinHash,
+      salt: user.salt,
+    },
+    catalog: {
+      categories: restoData.catalog ? restoData.catalog.categories || [] : [],
+      products: restoData.catalog ? restoData.catalog.products || [] : [],
+    },
   });
 });
 

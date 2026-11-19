@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../models/online_order_model.dart';
 import '../models/product_model.dart';
 import '../models/table_call_model.dart';
+import '../models/user_model.dart';
 
 /// Layanan Komunikasi Cloud SaaS REST API (Mini Resto POS Engine).
 /// 
@@ -112,6 +113,93 @@ class CloudSyncService {
       return null;
     } catch (e) {
       debugPrint('[CloudSync] Gagal cek lisensi: $e');
+      return null;
+    }
+  }
+
+  /// Menyinkronkan daftar staf karyawan ke Server Backend SaaS
+  Future<bool> syncStaffToCloud(List<UserModel> staff) async {
+    try {
+      final syncUrl = Uri.parse('$serverUrl/api/tenants/$_safeResto/staff/sync');
+      final payload = jsonEncode({
+        'staff': staff.map((s) => s.toMap()).toList(),
+      });
+
+      final response = await _client.post(
+        syncUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[CloudSync] Kendala syncStaffToCloud: $e');
+      return false;
+    }
+  }
+
+  /// Memverifikasi apakah Resto ID dan Username karyawan valid sebelum memasukkan PIN
+  Future<Map<String, dynamic>?> verifyStaffDevice({
+    required String restoId,
+    required String username,
+  }) async {
+    try {
+      final cleanResto = restoId.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-');
+      final verifyUrl = Uri.parse('$serverUrl/api/tenants/$cleanResto/staff/verify');
+      final payload = jsonEncode({
+        'username': username.trim().toLowerCase(),
+      });
+
+      final response = await _client.post(
+        verifyUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        _lastError = null;
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        final err = jsonDecode(response.body);
+        _lastError = err['error'] ?? 'Karyawan tidak ditemukan';
+        return null;
+      }
+    } catch (e) {
+      _lastError = 'Gagal terhubung ke server SaaS: $e';
+      return null;
+    }
+  }
+
+  /// Mengirimkan verifikasi PIN ke server SaaS untuk mengunci perangkat ke outlet
+  Future<Map<String, dynamic>?> pairStaffDevice({
+    required String restoId,
+    required String username,
+    required String pinHash,
+  }) async {
+    try {
+      final cleanResto = restoId.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-');
+      final pairUrl = Uri.parse('$serverUrl/api/tenants/$cleanResto/staff/pair');
+      final payload = jsonEncode({
+        'username': username.trim().toLowerCase(),
+        'pinHash': pinHash,
+      });
+
+      final response = await _client.post(
+        pairUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        _lastError = null;
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        final err = jsonDecode(response.body);
+        _lastError = err['error'] ?? 'PIN salah';
+        return null;
+      }
+    } catch (e) {
+      _lastError = 'Gagal verifikasi pairing: $e';
       return null;
     }
   }
