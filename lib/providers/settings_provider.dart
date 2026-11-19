@@ -282,6 +282,7 @@ class SettingsProvider with ChangeNotifier {
     required String cashierName,
     required String cashierPin,
     required TemplateBusinessType templateType,
+    String? ownerEmail,
   }) async {
     await _storageService.setupNewTenant(
       storeName: storeName,
@@ -294,6 +295,38 @@ class SettingsProvider with ChangeNotifier {
       cashierName: cashierName,
       cashierPin: cashierPin,
       templateType: templateType,
+      ownerEmail: ownerEmail,
+    );
+    loadSettings();
+    loadUsers();
+  }
+
+  /// Menautkan perangkat tablet ke outlet yang dimiliki oleh akun Google Owner
+  Future<void> linkOwnerTenant({
+    required String restoId,
+    required String storeName,
+    required String ownerEmail,
+    String? businessType,
+    String? address,
+    String? phoneWA,
+    String? subscriptionStatus,
+    String? trialExpiresAt,
+    List<CategoryModel>? categories,
+    List<ProductModel>? products,
+    List<UserModel>? staff,
+  }) async {
+    await _storageService.linkOwnerTenant(
+      restoId: restoId,
+      storeName: storeName,
+      ownerEmail: ownerEmail,
+      businessType: businessType,
+      address: address,
+      phoneWA: phoneWA,
+      subscriptionStatus: subscriptionStatus,
+      trialExpiresAt: trialExpiresAt,
+      categories: categories,
+      products: products,
+      staff: staff,
     );
     loadSettings();
     loadUsers();

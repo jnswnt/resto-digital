@@ -445,6 +445,7 @@ class StorageService {
     required String cashierName,
     required String cashierPin,
     required TemplateBusinessType templateType,
+    String? ownerEmail,
   }) async {
     // 1. Buat Akun Owner Baru
     final ownerSalt = AuthService.generateSalt();
@@ -499,6 +500,7 @@ class StorageService {
       subscriptionStatus: 'trial',
       trialExpiresAt: trialExpiry,
       businessType: businessType,
+      ownerEmail: ownerEmail ?? '',
     );
     await saveSettings(newSettings);
 
@@ -510,6 +512,52 @@ class StorageService {
     await saveProducts(products);
 
     // 7. Muat ulang seluruh cache dari database
+    await reloadFromDatabase();
+  }
+
+  /// Menautkan tablet / perangkat POS langsung ke outlet yang sudah dimiliki akun Google Owner
+  Future<void> linkOwnerTenant({
+    required String restoId,
+    required String storeName,
+    required String ownerEmail,
+    String? businessType,
+    String? address,
+    String? phoneWA,
+    String? subscriptionStatus,
+    String? trialExpiresAt,
+    List<CategoryModel>? categories,
+    List<ProductModel>? products,
+    List<UserModel>? staff,
+  }) async {
+    // 1. Simpan pengaturan resto
+    final currentSettings = getSettings();
+    final newSettings = currentSettings.copyWith(
+      storeName: storeName,
+      restoId: restoId,
+      ownerEmail: ownerEmail,
+      address: address ?? currentSettings.address,
+      phoneWA: phoneWA ?? currentSettings.phoneWA,
+      businessType: businessType ?? 'cafe',
+      isOnboarded: true,
+      subscriptionStatus: subscriptionStatus ?? 'trial',
+      trialExpiresAt: trialExpiresAt,
+    );
+    await saveSettings(newSettings);
+
+    // 2. Simpan staf jika ada dari server
+    if (staff != null && staff.isNotEmpty) {
+      await saveUsers(staff);
+    }
+
+    // 3. Simpan kategori & produk jika ada dari server
+    if (categories != null && categories.isNotEmpty) {
+      await saveCategories(categories);
+    }
+    if (products != null && products.isNotEmpty) {
+      await saveProducts(products);
+    }
+
+    // 4. Muat ulang seluruh cache
     await reloadFromDatabase();
   }
 

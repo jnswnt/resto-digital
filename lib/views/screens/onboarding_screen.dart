@@ -2,7 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../../models/settings_model.dart';
+import '../../models/category_model.dart';
+import '../../models/product_model.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/online_order_provider.dart';
@@ -29,6 +30,10 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   int _currentStep = 0;
   bool _isLoading = false;
+
+  // Akun Google Pemilik (Owner)
+  String? _googleOwnerEmail;
+  String? _googleOwnerName;
 
   // Controllers Step 1: Identitas Kafe
   final _storeNameController = TextEditingController();
@@ -127,6 +132,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         businessName: storeName,
         businessType: _selectedBusinessType,
         ownerName: ownerName,
+        ownerEmail: _googleOwnerEmail,
         phone: phone,
         address: address,
         trialDays: 14,
@@ -150,6 +156,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         cashierName: cashierName.isNotEmpty ? cashierName : 'Kasir 1',
         cashierPin: cashierPin.isNotEmpty ? cashierPin : '1234',
         templateType: _selectedTemplate,
+        ownerEmail: _googleOwnerEmail,
       );
 
       // 3. Muat ulang katalog POS & konfigurasikan Cloud Listener
@@ -376,6 +383,345 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
       ),
     );
+  }
+
+  /// Membuka dialog otentikasi Akun Google untuk Pemilik Resto (Owner).
+  /// Memeriksa outlet terdaftar di SaaS Cloud atau mengaktifkan akun baru.
+  Future<void> _handleGoogleSignIn() async {
+    final emailCtrl = TextEditingController(text: _googleOwnerEmail ?? '');
+    final nameCtrl = TextEditingController(text: _googleOwnerName ?? '');
+
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
+              child: const Icon(Icons.g_mobiledata_rounded, color: Colors.white, size: 24),
+            ),
+            const SizedBox(width: 10),
+            const Text('Masuk dengan Akun Google', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Gunakan akun Google Anda untuk mengelola beberapa cabang outlet atau mendaftarkan resto baru.',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: 'Email Google *',
+                  hintText: 'contoh: owner@gmail.com',
+                  prefixIcon: const Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Nama Lengkap / Pemilik *',
+                  hintText: 'contoh: Budi Santoso',
+                  prefixIcon: const Icon(Icons.person_outline),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final em = emailCtrl.text.trim();
+              final nm = nameCtrl.text.trim();
+              if (em.isNotEmpty) {
+                Navigator.pop(ctx, {'email': em, 'name': nm.isNotEmpty ? nm : 'Pemilik Resto'});
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Lanjutkan'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    final email = result['email']!;
+    final name = result['name']!;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final cloudSync = CloudSyncService(
+        serverUrl: CloudSyncService.defaultServerUrl,
+      );
+
+      final authRes = await cloudSync.authenticateWithGoogle(
+        email: email,
+        name: name,
+      );
+
+      if (!mounted) return;
+
+      if (authRes != null && authRes['success'] == true) {
+        final isNew = authRes['isNewUser'] == true;
+        final rawTenants = authRes['tenants'] as List<dynamic>? ?? [];
+
+        setState(() {
+          _googleOwnerEmail = email;
+          _googleOwnerName = name;
+          _ownerNameController.text = name;
+        });
+
+        if (!isNew && rawTenants.isNotEmpty) {
+          // Owner telah memiliki cabang/outlet terdaftar: Buka modal pilihan outlet
+          await _showOutletSelectionDialog(email, name, rawTenants);
+        } else {
+          // Pendaftaran baru dengan akun Google
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✓ Akun Google $email terhubung! Lengkapi nama resto Anda di bawah.'),
+              backgroundColor: AppTheme.emeraldGreen,
+            ),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(cloudSync.lastError ?? 'Gagal memverifikasi akun Google ke server.'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Kendala otentikasi Google: $e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Modal pemilihan cabang / outlet yang dimiliki oleh akun Google Owner
+  Future<void> _showOutletSelectionDialog(
+    String email,
+    String name,
+    List<dynamic> tenants,
+  ) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.storefront_rounded, color: AppTheme.primaryAmber),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Pilih Cabang / Resto Anda',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Ditemukan ${tenants.length} outlet terdaftar pada akun Google $email. Pilih salah satu untuk ditautkan langsung ke tablet ini:',
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: tenants.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (ctx, index) {
+                    final t = tenants[index] as Map<String, dynamic>;
+                    final bName = t['businessName'] ?? t['restoId'];
+                    final rId = t['restoId'] ?? '';
+                    final daysLeft = t['daysLeft'] ?? 14;
+                    final isExp = t['isExpired'] == true;
+
+                    return Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppTheme.primaryAmber.withOpacity(0.2),
+                          child: const Icon(Icons.store_rounded, color: AppTheme.primaryAmber),
+                        ),
+                        title: Text(bName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        subtitle: Text(
+                          'ID: $rId • ${isExp ? "Masa trial habis" : "Trial aktif: $daysLeft hari"}',
+                          style: TextStyle(fontSize: 12, color: isExp ? Colors.red : Colors.green.shade700),
+                        ),
+                        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                        onTap: () async {
+                          Navigator.pop(dlgCtx);
+                          await _linkExistingOwnerOutlet(rId, bName, email, t);
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dlgCtx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Silakan lengkapi formulir di bawah untuk mendaftarkan cabang baru.')),
+                  );
+                },
+                icon: const Icon(Icons.add_business_rounded, size: 16),
+                label: const Text('+ Buat Cabang / Resto Baru'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(42),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Menautkan tablet secara langsung ke outlet yang sudah terdaftar di Cloud SaaS
+  Future<void> _linkExistingOwnerOutlet(
+    String targetRestoId,
+    String businessName,
+    String ownerEmail,
+    Map<String, dynamic> tenantData,
+  ) async {
+    setState(() => _isLoading = true);
+    try {
+      final cloudSync = CloudSyncService(
+        serverUrl: CloudSyncService.defaultServerUrl,
+        restoId: targetRestoId,
+      );
+
+      final details = await cloudSync.fetchTenantDetails(targetRestoId);
+      if (!mounted) return;
+      final settingsProv = context.read<SettingsProvider>();
+      final posProv = context.read<PosProvider>();
+      final onlineOrderProv = context.read<OnlineOrderProvider>();
+      final authProv = context.read<AuthProvider>();
+
+      List<CategoryModel>? categories;
+      List<ProductModel>? products;
+      List<UserModel>? staffList;
+
+      if (details != null && details['success'] == true) {
+        final catalog = details['catalog'] as Map<String, dynamic>?;
+        if (catalog != null) {
+          final rawCats = catalog['categories'] as List<dynamic>? ?? [];
+          final rawProds = catalog['products'] as List<dynamic>? ?? [];
+
+          categories = rawCats.map<CategoryModel>((c) {
+            if (c is Map<String, dynamic>) {
+              return CategoryModel.fromMap(c);
+            }
+            final cName = c.toString();
+            return CategoryModel(id: cName.toLowerCase(), name: cName, sortOrder: 0);
+          }).toList();
+
+          products = rawProds.map<ProductModel>((p) {
+            if (p is Map<String, dynamic>) {
+              return ProductModel.fromMap(p);
+            }
+            return ProductModel(
+              id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
+              name: 'Menu',
+              categoryId: 'cat_default',
+              buyPrice: 0,
+              sellPrice: 0,
+            );
+          }).toList();
+        }
+
+        final rawStaff = details['staff'] as List<dynamic>? ?? [];
+        if (rawStaff.isNotEmpty) {
+          staffList = rawStaff.map<UserModel>((s) => UserModel.fromMap(s as Map<String, dynamic>)).toList();
+        }
+      }
+
+      await settingsProv.linkOwnerTenant(
+        restoId: targetRestoId,
+        storeName: businessName,
+        ownerEmail: ownerEmail,
+        businessType: tenantData['businessType'] ?? 'cafe',
+        address: tenantData['address'] ?? '',
+        phoneWA: tenantData['phone'] ?? '',
+        subscriptionStatus: tenantData['subscriptionStatus'] ?? 'trial',
+        trialExpiresAt: tenantData['trialExpiresAt'],
+        categories: categories,
+        products: products,
+        staff: staffList,
+      );
+
+      posProv.loadData();
+      onlineOrderProv.syncWithSettings(settingsProv.settings);
+
+      // Otomatis aktifkan user owner jika tersedia
+      if (staffList != null && staffList.isNotEmpty) {
+        final ownerUser = staffList.firstWhere(
+          (u) => u.isOwner,
+          orElse: () => staffList!.first,
+        );
+        authProv.setActiveUser(ownerUser);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🎉 Tablet berhasil ditautkan ke $businessName!'),
+            backgroundColor: AppTheme.emeraldGreen,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menautkan outlet: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   /// Dialog 2 Tahap untuk menautkan perangkat karyawan (Kasir/Dapur) ke outlet terdaftar
@@ -660,6 +1006,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           );
 
                           if (pairResult != null && pairResult['success'] == true) {
+                            if (!mounted) return;
                             final settingsProv = context.read<SettingsProvider>();
                             final posProv = context.read<PosProvider>();
                             final onlineOrderProv = context.read<OnlineOrderProvider>();
@@ -807,6 +1154,81 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
           ),
           const SizedBox(height: 16),
+
+          // Tombol Login / Lanjutkan dengan Akun Google untuk Owner
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: _googleOwnerEmail != null
+                    ? AppTheme.emeraldGreen
+                    : (isDark ? AppTheme.darkBorder : Colors.grey.shade300),
+                width: _googleOwnerEmail != null ? 1.5 : 1.0,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              color: _googleOwnerEmail != null
+                  ? AppTheme.emeraldGreen.withOpacity(0.08)
+                  : (isDark ? AppTheme.darkCardSurface : Colors.grey.shade50),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: _isLoading ? null : _handleGoogleSignIn,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.g_mobiledata_rounded, color: Colors.blue, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          _googleOwnerEmail != null
+                              ? 'Terhubung dengan Google: $_googleOwnerEmail'
+                              : 'Lanjutkan dengan Akun Google (Owner)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: _googleOwnerEmail != null ? AppTheme.emeraldGreen : textColor,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_googleOwnerEmail != null) ...[
+                        const SizedBox(width: 8),
+                        const Icon(Icons.check_circle_rounded, color: AppTheme.emeraldGreen, size: 18),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  _googleOwnerEmail != null
+                      ? 'lengkapi detail resto di bawah'
+                      : 'atau lengkapi formulir manual',
+                  style: TextStyle(fontSize: 12, color: subTextColor),
+                ),
+              ),
+              Expanded(child: Divider(color: isDark ? AppTheme.darkBorder : Colors.grey.shade300)),
+            ],
+          ),
+          const SizedBox(height: 20),
 
           // Pilihan Jenis Usaha
           Text('Pilih Jenis Usaha:', style: TextStyle(fontSize: 13, color: subTextColor)),

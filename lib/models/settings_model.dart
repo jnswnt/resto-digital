@@ -45,14 +45,16 @@ class SettingsModel {
   final String subscriptionStatus; // 'trial', 'active', 'expired'
   final String? trialExpiresAt; // Waktu kedaluwarsa masa trial (ISO string)
   final String businessType; // 'cafe', 'resto', 'warung', 'other'
+  final String ownerEmail; // Email Google akun pemilik resto untuk penautan multi-outlet SaaS
 
   /// Menghitung sisa hari masa aktif trial
   int get trialDaysRemaining {
     if (trialExpiresAt == null || trialExpiresAt!.isEmpty) return 14;
     try {
       final expiry = DateTime.parse(trialExpiresAt!);
-      final diff = expiry.difference(DateTime.now()).inDays;
-      return diff < 0 ? 0 : diff;
+      final diffMs = expiry.difference(DateTime.now()).inMilliseconds;
+      if (diffMs <= 0) return 0;
+      return (diffMs / (1000 * 60 * 60 * 24)).ceil();
     } catch (_) {
       return 14;
     }
@@ -108,6 +110,7 @@ class SettingsModel {
     this.subscriptionStatus = 'trial',
     this.trialExpiresAt,
     this.businessType = 'cafe',
+    this.ownerEmail = '',
   });
 
   Map<String, dynamic> toMap() {
@@ -147,6 +150,7 @@ class SettingsModel {
       'subscriptionStatus': subscriptionStatus,
       'trialExpiresAt': trialExpiresAt,
       'businessType': businessType,
+      'ownerEmail': ownerEmail,
     };
   }
 
@@ -192,6 +196,7 @@ class SettingsModel {
       subscriptionStatus: map['subscriptionStatus'] ?? 'trial',
       trialExpiresAt: map['trialExpiresAt'] as String?,
       businessType: map['businessType'] ?? 'cafe',
+      ownerEmail: map['ownerEmail'] ?? '',
     );
   }
 
@@ -231,6 +236,7 @@ class SettingsModel {
     String? subscriptionStatus,
     String? trialExpiresAt,
     String? businessType,
+    String? ownerEmail,
   }) {
     return SettingsModel(
       storeName: storeName ?? this.storeName,
@@ -269,6 +275,7 @@ class SettingsModel {
       subscriptionStatus: subscriptionStatus ?? this.subscriptionStatus,
       trialExpiresAt: trialExpiresAt ?? this.trialExpiresAt,
       businessType: businessType ?? this.businessType,
+      ownerEmail: ownerEmail ?? this.ownerEmail,
     );
   }
 }

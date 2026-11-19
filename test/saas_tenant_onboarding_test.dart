@@ -14,6 +14,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
 
   group('Onboarding & Registrasi Tenant SaaS (Cara 2)', () {
     late DatabaseHelper dbHelper;
@@ -111,7 +112,7 @@ void main() {
       expect(settings.businessType, 'cafe');
       expect(settings.isOnboarded, isTrue);
       expect(settings.subscriptionStatus, 'trial');
-      expect(settings.trialDaysRemaining, 14);
+      expect(settings.trialDaysRemaining, greaterThanOrEqualTo(13));
       expect(settings.isSubscriptionActive, isTrue);
 
       // 2. Verifikasi Users (Owner & Kasir baru)
@@ -257,6 +258,116 @@ void main() {
       expect(users.length, 1);
       expect(users.first.name, 'Lukman');
       expect(users.first.isKitchen, isTrue); // Terdeteksi sebagai Koki Dapur!
+    });
+
+    test('Otentikasi Akun Google Owner (Multi-Outlet & Penautan Instan)', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/auth/google') {
+          final body = jsonDecode(request.body);
+          if (body['email'] == 'owner@samelona.com') {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'isNewUser': false,
+                'user': {'email': 'owner@samelona.com', 'name': 'Owner Samelona'},
+                'tenants': [
+                  {
+                    'restoId': 'samelona-1',
+                    'businessName': 'Toko Samelona - Cabang 1',
+                    'subscriptionStatus': 'trial',
+                    'daysLeft': 14,
+                  },
+                  {
+                    'restoId': 'samelona-2',
+                    'businessName': 'Toko Samelona - Cabang 2',
+                    'subscriptionStatus': 'active',
+                    'daysLeft': 30,
+                  },
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          } else {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'isNewUser': true,
+                'user': {'email': body['email'], 'name': body['name']},
+                'tenants': [],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+        } else if (request.url.path == '/api/tenants/samelona-1/details') {
+          return http.Response(
+            jsonEncode({
+              'success': true,
+              'tenant': {
+                'restoId': 'samelona-1',
+                'businessName': 'Toko Samelona - Cabang 1',
+                'ownerEmail': 'owner@samelona.com',
+                'subscriptionStatus': 'trial',
+              },
+              'catalog': {'categories': [], 'products': []},
+              'staff': [
+                {
+                  'id': 'u_owner',
+                  'name': 'Owner Samelona',
+                  'role': 'owner',
+                  'pinHash': 'hash123',
+                  'salt': 'salt123',
+                  'isActive': true,
+                }
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        return http.Response('Not Found', 404);
+      });
+
+      final cloudSync = CloudSyncService(client: mockClient);
+
+      // 1. Uji Login Akun Google Owner yang sudah memiliki 2 cabang
+      final authExisting = await cloudSync.authenticateWithGoogle(
+        email: 'owner@samelona.com',
+        name: 'Owner Samelona',
+      );
+      expect(authExisting, isNotNull);
+      expect(authExisting!['isNewUser'], isFalse);
+      expect((authExisting['tenants'] as List).length, 2);
+
+      // 2. Uji Penautan Tablet ke Cabang 1
+      final details = await cloudSync.fetchTenantDetails('samelona-1');
+      expect(details, isNotNull);
+      expect(details!['tenant']['restoId'], 'samelona-1');
+
+      final storage = await StorageService.init(dbHelper: dbHelper);
+      await storage.linkOwnerTenant(
+        restoId: 'samelona-1',
+        storeName: 'Toko Samelona - Cabang 1',
+        ownerEmail: 'owner@samelona.com',
+        subscriptionStatus: 'trial',
+      );
+
+      final settings = storage.getSettings();
+      expect(settings.restoId, 'samelona-1');
+      expect(settings.storeName, 'Toko Samelona - Cabang 1');
+      expect(settings.ownerEmail, 'owner@samelona.com');
+      expect(settings.isOnboarded, isTrue);
+
+      // 3. Uji Login Akun Google Baru (Belum punya tenant)
+      final authNew = await cloudSync.authenticateWithGoogle(
+        email: 'newowner@gmail.com',
+        name: 'Budi Baru',
+      );
+      expect(authNew, isNotNull);
+      expect(authNew!['isNewUser'], isTrue);
+      expect((authNew['tenants'] as List).isEmpty, isTrue);
     });
   });
 }

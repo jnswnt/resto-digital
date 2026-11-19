@@ -294,6 +294,13 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                       'Resto ID: ${settings.restoId}',
                                       style: TextStyle(fontSize: 12, color: textMuted),
                                     ),
+                                    if (settings.ownerEmail.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Google Owner: ${settings.ownerEmail}',
+                                        style: TextStyle(fontSize: 11, color: AppTheme.primaryAmber),
+                                      ),
+                                    ],
                                   ],
                                 ),
                                 Container(
@@ -326,6 +333,8 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                 ),
                                 OutlinedButton.icon(
                                   onPressed: () async {
+                                    final navigator = Navigator.of(context);
+                                    final settingsProv = context.read<SettingsProvider>();
                                     final confirm = await showDialog<bool>(
                                       context: context,
                                       builder: (ctx) => AlertDialog(
@@ -351,8 +360,8 @@ class _CloudConfigScreenState extends State<CloudConfigScreen> {
                                       ),
                                     );
                                     if (confirm == true && mounted) {
-                                      await context.read<SettingsProvider>().resetToOnboarding();
-                                      if (mounted) Navigator.pop(context);
+                                      await settingsProv.resetToOnboarding();
+                                      navigator.pop();
                                     }
                                   },
                                   icon: const Icon(Icons.swap_horiz_rounded, size: 14),

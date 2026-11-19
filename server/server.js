@@ -486,7 +486,7 @@ function saveTenants(tenants) {
  * Mengaktifkan masa trial 14 hari secara instan.
  */
 app.post('/api/tenants/register', (req, res) => {
-  const { restoId, businessName, businessType, ownerName, phone, address, trialDays } = req.body;
+  const { restoId, businessName, businessType, ownerName, ownerEmail, phone, address, trialDays } = req.body;
 
   if (!restoId || !businessName) {
     return res.status(400).json({ error: 'restoId dan businessName wajib diisi.' });
@@ -505,6 +505,7 @@ app.post('/api/tenants/register', (req, res) => {
     businessName: String(businessName).trim(),
     businessType: businessType || 'cafe',
     ownerName: ownerName || 'Pemilik Toko',
+    ownerEmail: ownerEmail ? String(ownerEmail).trim().toLowerCase() : '',
     phone: phone || '',
     address: address || '',
     subscriptionStatus: 'trial',
@@ -530,7 +531,7 @@ app.post('/api/tenants/register', (req, res) => {
   restoData.address = tenantData.address;
   saveRestoData(sanitizedId, restoData);
 
-  console.log(`[Tenant] Pendaftaran baru: ${sanitizedId} (${tenantData.businessName}) | Trial: ${durationDays} hari`);
+  console.log(`[Tenant] Pendaftaran baru: ${sanitizedId} (${tenantData.businessName}) | Trial: ${durationDays} hari | Owner: ${tenantData.ownerEmail || '-'}`);
 
   return res.status(201).json({
     success: true,
@@ -590,6 +591,85 @@ app.get('/api/tenants', (req, res) => {
     success: true,
     totalTenants: tenants.length,
     tenants: tenants,
+  });
+});
+
+/**
+ * POST /api/auth/google
+ * Otentikasi Akun Google untuk Pemilik Resto (Owner Onboarding & Device Linking).
+ * Memeriksa apakah akun Google sudah memiliki tenant terdaftar di cloud SaaS.
+ * - Jika ada: Mengembalikan daftar outlet yang dimiliki (bisa pilih & tautkan instan).
+ * - Jika baru: Mengembalikan status isNewUser = true untuk melanjutkan wizard setup kafe.
+ */
+app.post('/api/auth/google', (req, res) => {
+  const { email, name, picture, idToken } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email Google wajib disertakan.' });
+  }
+
+  const cleanEmail = String(email).trim().toLowerCase();
+  const tenants = readTenants();
+
+  // Filter seluruh tenant yang terdaftar atas email owner Google ini
+  const userTenants = tenants.filter((t) => (t.ownerEmail || '').toLowerCase() === cleanEmail);
+
+  console.log(`[Google Auth] Login Google: ${cleanEmail} (${name}) | Terhubung dengan ${userTenants.length} outlet`);
+
+  return res.json({
+    success: true,
+    isNewUser: userTenants.length === 0,
+    user: {
+      email: cleanEmail,
+      name: name || 'Pemilik Toko',
+      picture: picture || '',
+    },
+    tenants: userTenants.map((t) => {
+      const now = new Date();
+      const expiry = new Date(t.trialExpiresAt || now);
+      const diffMs = expiry.getTime() - now.getTime();
+      const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      const isExpired = diffMs <= 0 && t.subscriptionStatus !== 'active_paid';
+      return {
+        restoId: t.restoId,
+        businessName: t.businessName,
+        businessType: t.businessType || 'cafe',
+        subscriptionStatus: isExpired ? 'expired' : t.subscriptionStatus,
+        trialExpiresAt: t.trialExpiresAt,
+        daysLeft: daysLeft,
+        isExpired: isExpired,
+        phone: t.phone || '',
+        address: t.address || '',
+      };
+    }),
+  });
+});
+
+/**
+ * GET /api/tenants/:restoId/details
+ * Mengambil detail lengkap konfigurasi tenant (info usaha, katalog, dan staf)
+ * untuk sinkronisasi otomatis saat tablet kasir/owner ditautkan via Akun Google.
+ */
+app.get('/api/tenants/:restoId/details', (req, res) => {
+  const { restoId } = req.params;
+  const sanitizedId = String(restoId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const tenants = readTenants();
+  const tenant = tenants.find((t) => t.restoId === sanitizedId);
+
+  if (!tenant) {
+    return res.status(404).json({ error: 'Tenant tidak ditemukan.' });
+  }
+
+  const restoData = readRestoData(sanitizedId);
+
+  return res.json({
+    success: true,
+    tenant: tenant,
+    catalog: {
+      categories: restoData.catalog ? restoData.catalog.categories || [] : [],
+      products: restoData.catalog ? restoData.catalog.products || [] : [],
+    },
+    staff: restoData.staff || [],
   });
 });
 

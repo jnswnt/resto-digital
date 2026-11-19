@@ -64,6 +64,7 @@ class CloudSyncService {
     required String businessName,
     String? businessType,
     String? ownerName,
+    String? ownerEmail,
     String? phone,
     String? address,
     int trialDays = 14,
@@ -76,6 +77,7 @@ class CloudSyncService {
         'businessName': businessName.trim(),
         'businessType': businessType ?? 'cafe',
         'ownerName': ownerName ?? 'Pemilik Toko',
+        'ownerEmail': ownerEmail ?? '',
         'phone': phone ?? '',
         'address': address ?? '',
         'trialDays': trialDays,
@@ -97,6 +99,64 @@ class CloudSyncService {
       }
     } catch (e) {
       _lastError = 'Koneksi registrasi tenant gagal: $e';
+      debugPrint('[CloudSync] $_lastError');
+      return null;
+    }
+  }
+
+  /// Melakukan otentikasi Akun Google untuk Owner (mencari tenant yang dimiliki atau pendaftaran baru)
+  Future<Map<String, dynamic>?> authenticateWithGoogle({
+    required String email,
+    required String name,
+    String? picture,
+    String? idToken,
+  }) async {
+    try {
+      final authUrl = Uri.parse('$serverUrl/api/auth/google');
+      final payload = jsonEncode({
+        'email': email.trim().toLowerCase(),
+        'name': name.trim(),
+        'picture': picture ?? '',
+        'idToken': idToken ?? '',
+      });
+
+      final response = await _client.post(
+        authUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        _lastError = null;
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        final err = jsonDecode(response.body);
+        _lastError = err['error'] ?? 'Gagal otentikasi Google';
+        return null;
+      }
+    } catch (e) {
+      _lastError = 'Koneksi otentikasi Google gagal: $e';
+      debugPrint('[CloudSync] $_lastError');
+      return null;
+    }
+  }
+
+  /// Mengambil detail lengkap konfigurasi tenant (info usaha, katalog, staf) untuk penautan instan tablet Owner
+  Future<Map<String, dynamic>?> fetchTenantDetails(String targetRestoId) async {
+    try {
+      final cleanResto = targetRestoId.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-');
+      final url = Uri.parse('$serverUrl/api/tenants/$cleanResto/details');
+      final response = await _client.get(url).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        _lastError = null;
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        final err = jsonDecode(response.body);
+        _lastError = err['error'] ?? 'Gagal mengambil detail tenant';
+        return null;
+      }
+    } catch (e) {
+      _lastError = 'Koneksi fetch tenant details gagal: $e';
       debugPrint('[CloudSync] $_lastError');
       return null;
     }

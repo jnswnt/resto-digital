@@ -68,6 +68,15 @@ class AuthProvider with ChangeNotifier {
     return false;
   }
 
+  /// Mengatur pengguna aktif secara langsung (digunakan saat penautan instan perangkat)
+  void setActiveUser(UserModel user) {
+    _currentUser = user;
+    _isLocked = false;
+    _isOwnerModeUnlocked = user.isOwner;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
   /// Memverifikasi PIN khusus Owner (misal untuk membuka Halaman Pengaturan)
   bool verifyOwnerPin(String pin) {
     final settings = _storageService.getSettings();
