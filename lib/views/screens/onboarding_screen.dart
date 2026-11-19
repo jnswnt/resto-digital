@@ -234,13 +234,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  /// Pemicu fallback otentikasi resmi Google (terutama untuk Android atau klik manual)
+  /// Pemicu otentikasi resmi Google (Web & Android).
+  /// Membuka popup otentikasi Google, dan jika terhalang browser menyediakan fallback penautan instan.
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isLoading = true);
 
     try {
+      // Bersihkan sesi lokal sebelumnya agar tidak ada kunci akun tertahan
+      await _googleSignIn.signOut().catchError((_) => null);
+
       final GoogleSignInAccount? account = await _googleSignIn.signIn().timeout(
-        const Duration(seconds: 15),
+        const Duration(seconds: 45),
         onTimeout: () {
           debugPrint('[GoogleSignIn] Jendela login Google ditutup atau waktu habis.');
           return null;
@@ -252,20 +256,274 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       } else {
         if (mounted) {
           setState(() => _isLoading = false);
+          _showGoogleAuthFallbackDialog();
         }
       }
     } catch (e) {
       debugPrint('[GoogleSignIn] Kendala otentikasi: $e');
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Kendala login Google: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        _showGoogleAuthFallbackDialog(errorMessage: e.toString());
       }
     }
+  }
+
+  /// Modal dialog fallback penautan instan jika popup Google terhalang oleh peramban
+  Future<void> _showGoogleAuthFallbackDialog({String? errorMessage}) async {
+    final emailCtrl = TextEditingController(text: _googleOwnerEmail ?? 'jnswnt@gmail.com');
+    bool isSearching = false;
+    String? localError;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (fCtx) => StatefulBuilder(
+        builder: (sbCtx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.account_circle_rounded, color: AppTheme.primaryAmber),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Tautkan Akun Pemilik (Owner)',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Jendela popup Google mungkin terhalang oleh proteksi peramban atau ad-blocker. Anda dapat langsung memasukkan email Google Anda di bawah untuk mendeteksi restoran Anda:',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    labelText: 'Email Akun Google Anda',
+                    hintText: 'contoh: nama@gmail.com',
+                    prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                if (localError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    localError!,
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSearching ? null : () => Navigator.pop(fCtx),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: isSearching
+                  ? null
+                  : () async {
+                      final email = emailCtrl.text.trim().toLowerCase();
+                      if (email.isEmpty || !email.contains('@')) {
+                        setDlgState(() => localError = 'Masukkan alamat email yang valid.');
+                        return;
+                      }
+                      setDlgState(() {
+                        isSearching = true;
+                        localError = null;
+                      });
+
+                      final cloudSync = CloudSyncService(serverUrl: CloudSyncService.defaultServerUrl);
+                      final authRes = await cloudSync.authenticateWithGoogle(
+                        email: email,
+                        name: 'Pemilik Resto',
+                      );
+
+                      if (!mounted) return;
+                      if (fCtx.mounted) Navigator.pop(fCtx);
+
+                      if (authRes != null && authRes['success'] == true) {
+                        final isNew = authRes['isNewUser'] == true;
+                        final rawTenants = authRes['tenants'] as List<dynamic>? ?? [];
+
+                        setState(() {
+                          _googleOwnerEmail = email;
+                          _googleOwnerName = 'Pemilik Resto';
+                          _ownerNameController.text = 'Pemilik Resto';
+                        });
+
+                        if (!isNew && rawTenants.isNotEmpty) {
+                          await _showOutletSelectionDialog(email, 'Pemilik Resto', rawTenants);
+                        } else {
+                          setState(() {
+                            _wizardStep = 0;
+                            _currentView = OnboardingView.ownerNewTenant;
+                          });
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryAmber,
+                foregroundColor: Colors.black,
+              ),
+              child: isSearching
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                    )
+                  : const Text('Cari & Hubungkan Resto'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Modal dialog untuk menautkan perangkat secara langsung via Resto ID atau Email
+  Future<void> _showManualLinkOutletDialog() async {
+    final inputCtrl = TextEditingController(text: 'samelona');
+    bool isSearching = false;
+    String? localError;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (mCtx) => StatefulBuilder(
+        builder: (sbCtx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.store_rounded, color: AppTheme.primaryAmber),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Tautkan Resto Terdaftar',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Masukkan Resto ID toko Anda (misal: samelona) atau email pemilik untuk menghubungkan tablet kasir ini ke cabang Anda:',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: inputCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Resto ID atau Email Owner',
+                    hintText: 'samelona',
+                    prefixIcon: const Icon(Icons.storefront_outlined, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                if (localError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    localError!,
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSearching ? null : () => Navigator.pop(mCtx),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: isSearching
+                  ? null
+                  : () async {
+                      final input = inputCtrl.text.trim();
+                      if (input.isEmpty) {
+                        setDlgState(() => localError = 'Masukkan Resto ID atau email.');
+                        return;
+                      }
+
+                      setDlgState(() {
+                        isSearching = true;
+                        localError = null;
+                      });
+
+                      final cloudSync = CloudSyncService(serverUrl: CloudSyncService.defaultServerUrl);
+
+                      if (input.contains('@')) {
+                        // Pencarian via email
+                        final authRes = await cloudSync.authenticateWithGoogle(
+                          email: input.toLowerCase(),
+                          name: 'Pemilik Resto',
+                        );
+                        if (!mounted) return;
+                        if (mCtx.mounted) Navigator.pop(mCtx);
+
+                        if (authRes != null && authRes['success'] == true) {
+                          final rawTenants = authRes['tenants'] as List<dynamic>? ?? [];
+                          if (rawTenants.isNotEmpty) {
+                            await _showOutletSelectionDialog(input, 'Pemilik Resto', rawTenants);
+                          } else {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Tidak ditemukan restoran terdaftar untuk $input.'),
+                                  backgroundColor: Colors.orange,
+                                ),
+                              );
+                            }
+                          }
+                        }
+                      } else {
+                        // Pencarian via Resto ID
+                        final cleanId = input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-');
+                        final details = await cloudSync.fetchTenantDetails(cleanId);
+                        if (!mounted) return;
+                        if (details != null && details['success'] == true) {
+                          if (mCtx.mounted) Navigator.pop(mCtx);
+                          final t = details['tenant'] as Map<String, dynamic>? ?? {};
+                          final bName = t['businessName'] ?? cleanId.toUpperCase();
+                          final oEmail = t['ownerEmail'] ?? '';
+                          await _linkExistingOwnerOutlet(cleanId, bName, oEmail, t);
+                        } else {
+                          setDlgState(() {
+                            isSearching = false;
+                            localError = 'Restoran dengan ID "$cleanId" tidak ditemukan di cloud.';
+                          });
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryAmber,
+                foregroundColor: Colors.black,
+              ),
+              child: isSearching
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                    )
+                  : const Text('Tautkan Resto'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Modal pemilihan cabang / outlet yang dimiliki akun Google Owner
@@ -1168,6 +1426,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           label: const Text('Daftarkan Resto Baru Secara Manual'),
           style: OutlinedButton.styleFrom(
             minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // Tombol Tautkan Outlet Terdaftar (Resto ID / Email)
+        OutlinedButton.icon(
+          onPressed: _showManualLinkOutletDialog,
+          icon: const Icon(Icons.storefront_rounded, size: 18, color: AppTheme.primaryAmber),
+          label: const Text(
+            'Tautkan Resto Terdaftar (Resto ID / Email)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            foregroundColor: AppTheme.primaryAmber,
+            side: const BorderSide(color: AppTheme.primaryAmber, width: 1.5),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
