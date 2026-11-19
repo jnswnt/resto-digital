@@ -52,11 +52,51 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Memverifikasi input PIN pada layar Kiosk Lock Screen
-  Future<bool> loginWithPin(String pin) async {
+  /// Memverifikasi input PIN pada layar Kiosk Lock Screen (opsional mencocokkan username spesifik)
+  Future<bool> loginWithPin(String pin, {String? username}) async {
     _errorMessage = null;
     final users = _storageService.getUsers().where((u) => u.isActive).toList();
 
+    // 1. Jika username disediakan, validasi spesifik ke pengguna tersebut
+    if (username != null && username.trim().isNotEmpty) {
+      final clean = username.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final matchingUser = users.firstWhere(
+        (u) =>
+            u.username.toLowerCase() == clean ||
+            u.name.toLowerCase() == clean ||
+            u.name.toLowerCase().startsWith(clean),
+        orElse: () => users.firstWhere(
+          (u) => u.id.toLowerCase() == clean,
+          orElse: () => UserModel(id: '', name: '', role: '', pinHash: '', salt: ''),
+        ),
+      );
+
+      if (matchingUser.id.isEmpty) {
+        _errorMessage = 'Username "$username" tidak ditemukan di tablet ini.';
+        notifyListeners();
+        return false;
+      }
+
+      final isValid = AuthService.verifyPin(
+        inputPin: pin,
+        pinHash: matchingUser.pinHash,
+        salt: matchingUser.salt,
+      );
+
+      if (isValid) {
+        _currentUser = matchingUser;
+        _isLocked = false;
+        _isOwnerModeUnlocked = matchingUser.isOwner;
+        notifyListeners();
+        return true;
+      }
+
+      _errorMessage = 'PIN tidak valid untuk ${matchingUser.name}.';
+      notifyListeners();
+      return false;
+    }
+
+    // 2. Jika tanpa username spesifik, verifikasi kecocokan PIN ke seluruh kasir aktif
     for (final user in users) {
       final isValid = AuthService.verifyPin(
         inputPin: pin,
@@ -67,7 +107,7 @@ class AuthProvider with ChangeNotifier {
       if (isValid) {
         _currentUser = user;
         _isLocked = false;
-        _isOwnerModeUnlocked = false;
+        _isOwnerModeUnlocked = user.isOwner;
         notifyListeners();
         return true;
       }
