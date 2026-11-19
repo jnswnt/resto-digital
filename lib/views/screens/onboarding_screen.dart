@@ -93,6 +93,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void initState() {
     super.initState();
     _storeNameController.addListener(_onStoreNameChanged);
+    // Pre-clear cache Google agar selalu menampilkan prompt pemilihan akun (select_account)
+    _googleSignIn.signOut().catchError((_) {});
   }
 
   @override
@@ -150,31 +152,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1. Cek apakah sudah ada sesi Google yang aktif di browser ini (Fast Session Restore)
-      GoogleSignInAccount? account = _googleSignIn.currentUser;
-      if (account == null) {
-        try {
-          account = await _googleSignIn.signInSilently().timeout(
-            const Duration(seconds: 3),
-            onTimeout: () => null,
-          );
-        } catch (_) {}
-      }
-
-      // 2. Jika belum ada sesi aktif, bersihkan status sesi lama & buka jendela login Google dengan timeout aman
-      if (account == null) {
-        try {
-          await _googleSignIn.signOut();
-        } catch (_) {}
-
-        account = await _googleSignIn.signIn().timeout(
-          const Duration(seconds: 25),
-          onTimeout: () {
-            debugPrint('[GoogleSignIn] Jendela login Google ditutup atau waktu habis.');
-            return null;
-          },
-        );
-      }
+      // 1. Panggil popup resmi Google Sign-In langsung pada event klik (user gesture aktif)
+      final GoogleSignInAccount? account = await _googleSignIn.signIn().timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          debugPrint('[GoogleSignIn] Jendela login Google ditutup atau waktu habis.');
+          return null;
+        },
+      );
 
       if (account == null) {
         // Pengguna membatalkan, menutup jendela popup Google, atau waktu habis
@@ -1113,6 +1098,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Center(
                   child: TextButton.icon(
                     onPressed: () {
+                      _googleSignIn.signOut().catchError((_) {});
                       setState(() => _isLoading = false);
                     },
                     icon: const Icon(Icons.close_rounded, size: 16, color: Colors.redAccent),
@@ -1127,6 +1113,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                 ),
               ],
+              const SizedBox(height: 10),
+              Center(
+                child: Text(
+                  'Pastikan jendela popup di peramban Anda diizinkan untuk masuk dengan Google.',
+                  style: TextStyle(fontSize: 11, color: subTextColor.withValues(alpha: 0.7)),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             ],
           ),
         ),
