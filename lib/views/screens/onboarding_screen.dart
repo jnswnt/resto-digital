@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 import '../../models/category_model.dart';
 import '../../models/product_model.dart';
@@ -51,6 +52,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _isLoading = false;
 
   // Akun Google Pemilik (Owner)
+  static const String _googleClientId =
+      '59601017378-8esd6kvtamagkjjnm2q6qac94gblbooq.apps.googleusercontent.com';
+
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: _googleClientId,
+    scopes: ['email', 'profile'],
+  );
+
   String? _googleOwnerEmail;
   String? _googleOwnerName;
 
@@ -134,95 +143,35 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // LOGIKA AKUN GOOGLE & MULTI-OUTLET SAAS (OWNER)
   // ==========================================================================
 
-  /// Membuka dialog otentikasi Akun Google untuk Pemilik Resto (Owner).
+  /// Melakukan otentikasi resmi dengan Akun Google (Google OAuth 2.0).
+  /// Membuka popup resmi Google untuk memilih akun, mengambil email & nama profil,
+  /// lalu memverifikasi data kepemilikan tenant ke Backend SaaS tanpa perlu mengisi form manual.
   Future<void> _handleGoogleSignIn() async {
-    final emailCtrl = TextEditingController(text: _googleOwnerEmail ?? '');
-    final nameCtrl = TextEditingController(text: _googleOwnerName ?? '');
-
-    final result = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
-              child: const Icon(Icons.g_mobiledata_rounded, color: Colors.white, size: 24),
-            ),
-            const SizedBox(width: 10),
-            const Text('Masuk dengan Akun Google', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Gunakan akun Google Anda untuk mengelola beberapa cabang outlet atau mendaftarkan resto baru.',
-                style: TextStyle(fontSize: 13, color: Colors.grey),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
-                  labelText: 'Email Google *',
-                  hintText: 'contoh: owner@samelona.com',
-                  prefixIcon: const Icon(Icons.email_outlined),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nameCtrl,
-                decoration: InputDecoration(
-                  labelText: 'Nama Lengkap Pemilik *',
-                  hintText: 'contoh: Budi Santoso',
-                  prefixIcon: const Icon(Icons.person_outline),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final em = emailCtrl.text.trim();
-              final nm = nameCtrl.text.trim();
-              if (em.isNotEmpty) {
-                Navigator.pop(ctx, {'email': em, 'name': nm.isNotEmpty ? nm : 'Pemilik Resto'});
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            child: const Text('Lanjutkan'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == null || !mounted) return;
-
-    final email = result['email']!;
-    final name = result['name']!;
-
     setState(() => _isLoading = true);
 
     try {
+      // 1. Panggil popup resmi Google Sign-In akun Google
+      final GoogleSignInAccount? account = await _googleSignIn.signIn();
+
+      if (account == null) {
+        // Pengguna membatalkan atau menutup jendela popup Google
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      final email = account.email;
+      final name = account.displayName?.isNotEmpty == true
+          ? account.displayName!
+          : 'Pemilik Resto';
+      final picture = account.photoUrl;
+
+      // 2. Hubungkan data akun Google ke Server Backend SaaS
       final cloudSync = CloudSyncService(serverUrl: CloudSyncService.defaultServerUrl);
-      final authRes = await cloudSync.authenticateWithGoogle(email: email, name: name);
+      final authRes = await cloudSync.authenticateWithGoogle(
+        email: email,
+        name: name,
+        picture: picture,
+      );
 
       if (!mounted) return;
 
@@ -261,13 +210,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         );
       }
     } catch (e) {
+      debugPrint('[GoogleSignIn] Kendala otentikasi: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kendala otentikasi Google: $e'), backgroundColor: Colors.red.shade700),
+          SnackBar(
+            content: Text('Kendala login Google: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -1342,8 +1297,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 children: [
                   const Icon(Icons.check_circle_rounded, color: AppTheme.emeraldGreen, size: 16),
                   const SizedBox(width: 8),
-                  Text('Akun Google Terhubung: $_googleOwnerEmail',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.emeraldGreen)),
+                  Text(
+                    _googleOwnerName != null
+                        ? 'Akun Google: $_googleOwnerName ($_googleOwnerEmail)'
+                        : 'Akun Google Terhubung: $_googleOwnerEmail',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.emeraldGreen,
+                    ),
+                  ),
                 ],
               ),
             ),
