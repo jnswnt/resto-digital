@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -328,25 +329,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   );
                 },
               ),
+              const SizedBox(height: 10),
+
+              _buildMenuCard(
+                context: context,
+                icon: Icons.logout_rounded,
+                iconBg: const Color(0xFFEF4444),
+                title: 'Logout / Keluar Sesi Kasir',
+                subtitle: 'Keluar dari sesi akun aktif (${auth.currentUser?.name ?? "Pengguna"}) dan kunci kembali tablet kasir ke layar PIN.',
+                onTap: () => _confirmLogout(context, auth),
+              ),
 
               const SizedBox(height: 28),
 
-              // TOMBOL KUNCI PENGATURAN
-              Center(
-                child: TextButton.icon(
-                  onPressed: () {
-                    auth.lockOwnerMode();
-                    if (widget.onCancel != null) {
-                      widget.onCancel!();
-                    } else if (!widget.embedded && Navigator.canPop(context)) {
-                      Navigator.pop(context);
-                    }
-                  },
-                  icon: const Icon(Icons.lock_outline_rounded, size: 16),
-                  label: const Text('Kunci Halaman Pengaturan'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: textMuted,
-                  ),
+              // TOMBOL AKSI BAWAH: KUNCI PENGATURAN & LOGOUT
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          auth.lockOwnerMode();
+                          if (widget.onCancel != null) {
+                            widget.onCancel!();
+                          } else if (!widget.embedded && Navigator.canPop(context)) {
+                            Navigator.pop(context);
+                          }
+                        },
+                        icon: const Icon(Icons.lock_outline_rounded, size: 16),
+                        label: const Text('Kunci Pengaturan'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: textMuted,
+                          side: BorderSide(color: borderColor),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _confirmLogout(context, auth),
+                        icon: const Icon(Icons.logout_rounded, size: 16),
+                        label: const Text('Logout Kasir'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.dangerRed.withValues(alpha: 0.15),
+                          foregroundColor: AppTheme.dangerRed,
+                          elevation: 0,
+                          side: BorderSide(color: AppTheme.dangerRed.withValues(alpha: 0.3)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
@@ -395,6 +432,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _confirmLogout(context, auth),
+                  icon: const Icon(Icons.logout_rounded, size: 14, color: AppTheme.dangerRed),
+                  label: const Text(
+                    'Logout',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.dangerRed,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: AppTheme.dangerRed.withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
               ],
             ),
           ),
@@ -406,6 +461,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pengaturan Resto', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout_rounded, color: AppTheme.dangerRed),
+            tooltip: 'Logout Kasir',
+            onPressed: () => _confirmLogout(context, auth),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: content,
     );
@@ -523,6 +586,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// Menampilkan dialog konfirmasi sebelum keluar (logout) dari sesi kasir/owner
+  Future<void> _confirmLogout(BuildContext context, AuthProvider auth) async {
+    final user = auth.currentUser;
+    final userName = user?.name ?? 'Pengguna';
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout_rounded, color: AppTheme.dangerRed),
+            SizedBox(width: 10),
+            Text('Konfirmasi Logout', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Apakah Anda yakin ingin keluar dari sesi "$userName"?',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Aplikasi akan mengunci tablet kasir dan kembali ke layar PIN (Lock Screen). Seluruh transaksi, katalog menu, dan pengaturan toko tetap tersimpan dengan aman.',
+              style: TextStyle(
+                fontSize: 12.5,
+                color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(dlgCtx, true),
+            icon: const Icon(Icons.logout_rounded, size: 16),
+            label: const Text('Ya, Logout'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.dangerRed,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && context.mounted) {
+      // 1. Bersihkan otentikasi Google jika ada sesi tertahan
+      GoogleSignIn().signOut().catchError((_) => null);
+
+      // 2. Kunci mode owner
+      auth.lockOwnerMode();
+
+      // 3. Logout sesi autentikasi (mengembalikan app.dart ke Lock Screen)
+      auth.logout();
+
+      // 4. Tutup halaman jika bukan embedded atau pop ke root navigator
+      if (!widget.embedded && Navigator.canPop(context)) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  }
+
   /// Tampilan proteksi inline untuk halaman pengaturan toko
   Widget _buildOwnerLockScreen(BuildContext context, bool isDark, AuthProvider auth) {
     final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
@@ -541,9 +675,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: widget.onOpenMenuDrawer,
                     )
                   : null,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.logout_rounded, color: AppTheme.dangerRed),
+                  tooltip: 'Logout Kasir',
+                  onPressed: () => _confirmLogout(context, auth),
+                ),
+                const SizedBox(width: 4),
+              ],
             )
           : AppBar(
               title: const Text('Pengaturan Resto', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.logout_rounded, color: AppTheme.dangerRed),
+                  tooltip: 'Logout Kasir',
+                  onPressed: () => _confirmLogout(context, auth),
+                ),
+                const SizedBox(width: 4),
+              ],
             ),
       body: Center(
         child: SingleChildScrollView(
@@ -700,6 +850,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Tombol Logout Kasir dari Lock Screen Pengaturan
+                  TextButton.icon(
+                    onPressed: () => _confirmLogout(context, auth),
+                    icon: const Icon(Icons.logout_rounded, size: 16, color: AppTheme.dangerRed),
+                    label: const Text(
+                      'Logout Kasir / Kunci Tablet',
+                      style: TextStyle(
+                        color: AppTheme.dangerRed,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
