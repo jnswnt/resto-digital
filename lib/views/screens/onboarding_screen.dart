@@ -13,6 +13,7 @@ import '../../services/auth_service.dart';
 import '../../services/cloud_sync_service.dart';
 import '../../services/onboarding_template_service.dart';
 import '../../theme/app_theme.dart';
+import '../widgets/google_auth_btn.dart';
 
 /// Enum tahapan navigasi layar awal (Arsitektur Gateway & Pemisahan Peran).
 /// Memisahkan portal Owner dan penautan HP Karyawan secara terpisah dan rapi.
@@ -93,8 +94,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void initState() {
     super.initState();
     _storeNameController.addListener(_onStoreNameChanged);
-    // Pre-clear cache Google agar selalu menampilkan prompt pemilihan akun (select_account)
-    _googleSignIn.signOut().catchError((_) {});
+    // Dengarkan event autentikasi akun Google resmi (bekerja mulus via renderButton GIS Web & Mobile)
+    _googleSignIn.onCurrentUserChanged.listen((GoogleSignInAccount? account) {
+      if (account != null && mounted) {
+        _handleGoogleAccountAuthenticated(account);
+      }
+    });
   }
 
   @override
@@ -145,43 +150,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // LOGIKA AKUN GOOGLE & MULTI-OUTLET SAAS (OWNER)
   // ==========================================================================
 
-  /// Melakukan otentikasi resmi dengan Akun Google (Google OAuth 2.0).
-  /// Membuka popup resmi Google untuk memilih akun, mengambil email & nama profil,
-  /// lalu memverifikasi data kepemilikan tenant ke Backend SaaS tanpa perlu mengisi form manual.
-  Future<void> _handleGoogleSignIn() async {
+  /// Memproses akun Google yang telah berhasil diautentikasi (baik via GIS Button Web maupun popup mobile)
+  Future<void> _handleGoogleAccountAuthenticated(GoogleSignInAccount account) async {
+    final email = account.email;
+    final name = account.displayName?.isNotEmpty == true
+        ? account.displayName!
+        : 'Pemilik Resto';
+    final picture = account.photoUrl;
+
     setState(() => _isLoading = true);
 
     try {
-      // 1. Panggil popup resmi Google Sign-In langsung pada event klik (user gesture aktif)
-      final GoogleSignInAccount? account = await _googleSignIn.signIn().timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {
-          debugPrint('[GoogleSignIn] Jendela login Google ditutup atau waktu habis.');
-          return null;
-        },
-      );
-
-      if (account == null) {
-        // Pengguna membatalkan, menutup jendela popup Google, atau waktu habis
-        if (mounted) {
-          setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Login Google dibatalkan atau waktu habis. Silakan coba klik lagi.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-        return;
-      }
-
-      final email = account.email;
-      final name = account.displayName?.isNotEmpty == true
-          ? account.displayName!
-          : 'Pemilik Resto';
-      final picture = account.photoUrl;
-
-      // 3. Hubungkan data akun Google ke Server Backend SaaS
+      // Hubungkan data akun Google ke Server Backend SaaS
       final cloudSync = CloudSyncService(serverUrl: CloudSyncService.defaultServerUrl);
       final authRes = await cloudSync.authenticateWithGoogle(
         email: email,
@@ -232,7 +212,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         );
       }
     } catch (e) {
-      debugPrint('[GoogleSignIn] Kendala otentikasi: $e');
+      debugPrint('[GoogleSignIn] Kendala otentikasi server: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -242,6 +222,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         );
       }
     } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  /// Pemicu fallback otentikasi resmi Google (terutama untuk Android atau klik manual)
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final GoogleSignInAccount? account = await _googleSignIn.signIn().timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          debugPrint('[GoogleSignIn] Jendela login Google ditutup atau waktu habis.');
+          return null;
+        },
+      );
+
+      if (account != null) {
+        await _handleGoogleAccountAuthenticated(account);
+      } else {
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
+      }
+    } catch (e) {
+      debugPrint('[GoogleSignIn] Kendala otentikasi: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -1072,25 +1080,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Tombol Google
-              ElevatedButton.icon(
-                onPressed: _isLoading ? null : _handleGoogleSignIn,
-                icon: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                  child: const Icon(Icons.g_mobiledata_rounded, color: Colors.blue, size: 20),
-                ),
-                label: Text(
-                  _isLoading ? 'Menghubungkan...' : 'Lanjutkan dengan Akun Google',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue.shade600,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(48),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
+              // Tombol Google Resmi (Platform-Adaptive: Render GIS Button di Web, ElevatedButton di Mobile)
+              buildGoogleSignInPlatformButton(
+                onPressed: _handleGoogleSignIn,
+                isLoading: _isLoading,
               ),
 
               if (_isLoading) ...[
