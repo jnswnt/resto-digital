@@ -145,6 +145,21 @@ void main() {
               completedAt INTEGER
             )
           ''');
+          await db.execute('''
+            CREATE TABLE transactions (
+              id TEXT PRIMARY KEY,
+              orderId TEXT NOT NULL,
+              shiftId TEXT NOT NULL,
+              cashierId TEXT NOT NULL,
+              cashierName TEXT NOT NULL,
+              paymentMethod TEXT NOT NULL,
+              totalAmount INTEGER NOT NULL,
+              amountPaid INTEGER NOT NULL,
+              change INTEGER NOT NULL,
+              customerName TEXT NOT NULL,
+              createdAt INTEGER NOT NULL
+            )
+          ''');
           // Sisipkan 1 order versi v1
           await db.insert('orders', {
             'id': 'ord_v1',

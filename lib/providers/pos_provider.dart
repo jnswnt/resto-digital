@@ -111,6 +111,12 @@ class PosProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Memuat ulang data langsung dari database ke cache lalu memperbarui UI
+  Future<void> refreshData() async {
+    await _storageService.reloadFromDatabase();
+    loadData();
+  }
+
   /// Daftar produk yang sudah difilter berdasarkan kategori dan kata kunci pencarian
   List<ProductModel> get filteredProducts {
     return _products.where((prod) {

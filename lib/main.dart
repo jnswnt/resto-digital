@@ -23,8 +23,9 @@ void main() async {
   // Inisialisasi format tanggal bahasa Indonesia
   await initializeDateFormatting('id_ID', null);
 
-  // Inisialisasi penyimpanan lokal dan starter kit resto
-  final storageService = await StorageService.init();
+  // Inisialisasi cepat preferensi lokal (Fast Boot: hanya baca kredensial & pengaturan)
+  // Seluruh database transaksi akan dimuat secara lazy-load setelah login dengan display interaktif.
+  final storageService = await StorageService.initFast();
   final settings = storageService.getSettings();
   final cloudSyncService = CloudSyncService(
     projectId: settings.firebaseProjectId,

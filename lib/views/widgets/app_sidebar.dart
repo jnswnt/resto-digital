@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../providers/analytics_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/pos_provider.dart';
 import '../../providers/customer_debt_provider.dart';
 import '../../providers/online_order_provider.dart';
+import '../../providers/pos_provider.dart';
+import '../../providers/shift_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../theme/app_theme.dart';
 import 'owner_profile_dialog.dart';
@@ -766,6 +768,42 @@ class _AppSidebarState extends State<AppSidebar> {
                 ),
               ),
             ),
+            IconButton(
+              icon: Icon(Icons.sync_rounded, size: 18, color: textMuted),
+              tooltip: 'Sinkronkan / Segarkan Data Toko',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final posProv = context.read<PosProvider>();
+                final shiftProv = context.read<ShiftProvider>();
+                final debtProv = context.read<CustomerDebtProvider>();
+                final analyticsProv = context.read<AnalyticsProvider>();
+
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Menyinkronkan data toko...'),
+                    duration: Duration(milliseconds: 600),
+                  ),
+                );
+
+                await posProv.refreshData();
+                shiftProv.loadActiveShift();
+                debtProv.loadCustomers();
+                analyticsProv.calculateSummary();
+
+                if (mounted) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('✓ Data toko berhasil disinkronkan.'),
+                      backgroundColor: AppTheme.emeraldGreen,
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                }
+              },
+            ),
+            const SizedBox(width: 8),
             IconButton(
               icon: Icon(Icons.lock_clock_outlined, size: 18, color: textMuted),
               tooltip: 'Kunci Layar (Ganti Kasir)',

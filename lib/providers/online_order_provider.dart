@@ -29,8 +29,11 @@ class OnlineOrderProvider with ChangeNotifier {
   OnlineOrderProvider(
     this._syncService, {
     SoundService? soundService,
+    bool autoStart = false,
   }) : _soundService = soundService ?? SoundService() {
-    startListening();
+    if (autoStart) {
+      startListening();
+    }
   }
 
   List<OnlineOrderModel> get onlineOrders => List.unmodifiable(_onlineOrders);

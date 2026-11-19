@@ -35,30 +35,93 @@ class StorageService {
   List<ShiftModel> _cachedShifts = [];
   List<CashMovementModel> _cachedCashMovements = [];
 
+  // Menandakan apakah database transaksional operasional resto sudah dimuat ke memori
+  bool _isStoreDataLoaded = false;
+  bool get isStoreDataLoaded => _isStoreDataLoaded;
+
   SharedPreferences get prefs => _prefs;
   DatabaseHelper get dbHelper => _dbHelper;
 
   StorageService(this._prefs, [DatabaseHelper? dbHelper])
       : _dbHelper = dbHelper ?? DatabaseHelper.instance;
 
-  static Future<StorageService> init({DatabaseHelper? dbHelper}) async {
+  /// Inisialisasi Ringan (Fast Boot / Cold Boot Instan).
+  /// Hanya memuat SharedPreferences (pengaturan resto & kredensial akun kasir/owner)
+  /// tanpa membuka atau mengeksekusi query database transaksi di awal.
+  /// Menjamin antarmuka awal (Onboarding / Lock Screen) terbuka seketika (< 50ms).
+  static Future<StorageService> initFast({DatabaseHelper? dbHelper}) async {
     final prefs = await SharedPreferences.getInstance();
     final db = dbHelper ?? DatabaseHelper.instance;
-    await db.database;
-
     final service = StorageService(prefs, db);
 
-    // 1. Jalankan migrasi satu kali jika ada data lama di SharedPreferences
-    final migration = DatabaseMigrationService(prefs, db);
-    await migration.migrateIfNeeded();
-
-    // 2. Muat data awal (starter kit) jika database masih kosong
-    await service._seedInitialDataIfNeeded();
-
-    // 3. Muat seluruh data dari SQLite ke in-memory cache
-    await service.reloadFromDatabase();
+    // Inisialisasi akun kasir default di SharedPreferences jika aplikasi baru dipasang
+    await service._ensureDefaultUsersExist();
 
     return service;
+  }
+
+  /// Inisialisasi Penuh Standar (Backward compatibility untuk test suite)
+  static Future<StorageService> init({DatabaseHelper? dbHelper}) async {
+    final service = await initFast(dbHelper: dbHelper);
+    await service.loadStoreDataInteractive();
+    return service;
+  }
+
+  /// Pemuatan Data Operasional Toko Secara Bertahap & Interaktif (Lazy-Load).
+  /// Dipanggil saat kasir/owner berhasil login dengan PIN, menyajikan progres detail ke UI.
+  Future<void> loadStoreDataInteractive({
+    void Function(double progress, String stepMessage)? onProgress,
+  }) async {
+    // Jika data toko sudah pernah dimuat dan masih ada di RAM, langsung selesaikan
+    if (_isStoreDataLoaded) {
+      onProgress?.call(1.0, 'Sistem POS Siap Digunakan');
+      return;
+    }
+
+    // Tahap 1 (20%): Akses Database & Integritas Skema
+    onProgress?.call(0.20, 'Memeriksa integritas database lokal...');
+    await _dbHelper.database;
+    final migration = DatabaseMigrationService(_prefs, _dbHelper);
+    await migration.migrateIfNeeded();
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    // Tahap 2 (45%): Starter Kit Menu & Katalog Produk
+    onProgress?.call(0.45, 'Menyiapkan katalog menu & ketersediaan stok...');
+    await _seedInitialDataIfNeeded();
+    final catAndProd = await Future.wait([
+      _dbHelper.getCategories(),
+      _dbHelper.getProducts(),
+    ]);
+    _cachedCategories = catAndProd[0] as List<CategoryModel>;
+    _cachedProducts = catAndProd[1] as List<ProductModel>;
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    // Tahap 3 (70%): Denah Meja, Pesanan Aktif, & Pelanggan
+    onProgress?.call(0.70, 'Memuat denah meja & riwayat pesanan...');
+    final ordersAndCust = await Future.wait([
+      _dbHelper.getCustomers(),
+      _dbHelper.getOrders(),
+      _dbHelper.getTransactions(),
+    ]);
+    _cachedCustomers = ordersAndCust[0] as List<CustomerModel>;
+    _cachedOrders = ordersAndCust[1] as List<OrderModel>;
+    _cachedTransactions = ordersAndCust[2] as List<TransactionModel>;
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    // Tahap 4 (90%): Sesi Shift Kasir & Arus Kas Laci
+    onProgress?.call(0.90, 'Memeriksa sesi shift kasir & modal laci...');
+    final shiftAndCash = await Future.wait([
+      _dbHelper.getShifts(),
+      _dbHelper.getCashMovements(),
+    ]);
+    _cachedShifts = shiftAndCash[0] as List<ShiftModel>;
+    _cachedCashMovements = shiftAndCash[1] as List<CashMovementModel>;
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    // Tahap 5 (100%): Siap Operasional
+    _isStoreDataLoaded = true;
+    onProgress?.call(1.00, 'Sistem POS Siap Digunakan!');
+    await Future.delayed(const Duration(milliseconds: 100));
   }
 
   /// Memuat ulang seluruh in-memory cache langsung dari database (SQLite / Web LocalStorage) secara paralel
@@ -81,11 +144,11 @@ class StorageService {
     _cachedTransactions = results[4] as List<TransactionModel>;
     _cachedShifts = results[5] as List<ShiftModel>;
     _cachedCashMovements = results[6] as List<CashMovementModel>;
+    _isStoreDataLoaded = true;
   }
 
-  /// Memasukkan data awal jika aplikasi baru pertama kali dipasang
-  Future<void> _seedInitialDataIfNeeded() async {
-    // 1. Inisialisasi Akun Kasir, Koki Dapur, & Owner jika belum ada di SharedPreferences
+  /// Memastikan akun kasir, koki, dan owner minimal ada di SharedPreferences untuk keperluan otentikasi cepat
+  Future<void> _ensureDefaultUsersExist() async {
     if (!_prefs.containsKey(_keyUsers)) {
       final budiSalt = AuthService.generateSalt();
       final sitiSalt = AuthService.generateSalt();
@@ -140,6 +203,12 @@ class StorageService {
       );
       await saveSettings(settings);
     }
+  }
+
+  /// Memasukkan data awal jika aplikasi baru pertama kali dipasang
+  Future<void> _seedInitialDataIfNeeded() async {
+    // 1. Pastikan pengguna default sudah tersimpan di SharedPreferences
+    await _ensureDefaultUsersExist();
 
     // 2. Inisialisasi Menu & Kategori Resto di SQLite jika masih kosong
     final existingCategories = await _dbHelper.getCategories();

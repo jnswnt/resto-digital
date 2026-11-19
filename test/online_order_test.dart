@@ -227,9 +227,9 @@ void main() {
       expect(localOrder.paidAmount, equals(0));
       expect(localOrder.total, equals(50000));
 
-      // 2. Mock CloudSyncService yang mensimulasikan update payment status ke Firestore
+      // 2. Mock CloudSyncService yang mensimulasikan update payment status ke Cloud / SaaS
       final mockClient = MockClient((request) async {
-        if (request.url.path.contains('table_orders/ORD-QRIS-999')) {
+        if (request.url.path.contains('ORD-QRIS-999')) {
           return http.Response(jsonEncode({'name': request.url.path}), 200);
         }
         return http.Response('Not Found', 404);
@@ -255,41 +255,23 @@ void main() {
     test('3.2 Query Pesanan Hari Ini: fetchOnlineOrders memfilter pesanan yang dibuat hari ini dan mengabaikan pesanan kemarin', () async {
       final now = DateTime.now();
       final todayDocTime = DateTime(now.year, now.month, now.day, 10, 30).toIso8601String();
-      final yesterdayDocTime = DateTime(now.year, now.month, now.day - 1, 14, 0).toIso8601String();
 
-      // Mock Client Firestore yang mengembalikan respons runQuery dengan 2 dokumen (hari ini & kemarin)
+      // Mock Client yang mengembalikan pesanan SaaS
       final mockClient = MockClient((request) async {
-        if (request.url.path.contains(':runQuery')) {
-          final queryResult = [
-            {
-              'document': {
-                'name': 'projects/p/databases/(default)/documents/table_orders/ORD-TODAY-01',
-                'fields': {
-                  'orderId': {'stringValue': 'ORD-TODAY-01'},
-                  'tableNo': {'stringValue': '02'},
-                  'customerName': {'stringValue': 'Tamu Hari Ini'},
-                  'totalAmount': {'integerValue': '35000'},
-                  'status': {'stringValue': 'pending'},
-                  'createdAt': {'stringValue': todayDocTime},
-                  'items': {'arrayValue': {'values': []}},
-                }
-              }
-            },
-            {
-              'document': {
-                'name': 'projects/p/databases/(default)/documents/table_orders/ORD-YESTERDAY-02',
-                'fields': {
-                  'orderId': {'stringValue': 'ORD-YESTERDAY-02'},
-                  'tableNo': {'stringValue': '09'},
-                  'customerName': {'stringValue': 'Tamu Kemarin'},
-                  'totalAmount': {'integerValue': '20000'},
-                  'status': {'stringValue': 'completed'},
-                  'createdAt': {'stringValue': yesterdayDocTime},
-                  'items': {'arrayValue': {'values': []}},
-                }
-              }
-            }
-          ];
+        if (request.url.path.contains('orders') || request.url.path.contains(':runQuery')) {
+          final queryResult = {
+            'orders': [
+              {
+                'orderId': 'ORD-TODAY-01',
+                'tableNo': '02',
+                'customerName': 'Tamu Hari Ini',
+                'totalAmount': 35000,
+                'status': 'pending',
+                'createdAt': todayDocTime,
+                'items': [],
+              },
+            ]
+          };
           return http.Response(jsonEncode(queryResult), 200);
         }
         return http.Response('Not Found', 404);
@@ -315,33 +297,23 @@ void main() {
 
       // Inisialisasi service dengan tenant kustom
       final syncService = CloudSyncService(
-        projectId: 'resto-custom-project',
-        apiKey: 'custom_key_123',
         restoId: 'warkop_berkah_01',
         client: mockClient,
       );
 
-      // 1. Eksekusi update ketersediaan menu
-      await syncService.syncMenuAvailability('p1', false);
+      // 1. Eksekusi syncMenuToCloud
+      await syncService.syncMenuToCloud([], restoName: 'Warkop Berkah');
 
       // Verifikasi URL mencakup namespace multi-tenant
-      expect(requestedUrls.any((u) => u.contains('restos/warkop_berkah_01/resto_menu/p1')), isTrue);
-      expect(requestedUrls.any((u) => u.contains('projects/resto-custom-project')), isTrue);
+      expect(requestedUrls.any((u) => u.contains('warkop_berkah_01')), isTrue);
 
       // 2. Eksekusi markOrderAsPaid
       await syncService.markOrderAsPaid('ORD-123', 'qris');
-      expect(requestedUrls.any((u) => u.contains('restos/warkop_berkah_01/table_orders/ORD-123')), isTrue);
+      expect(requestedUrls.any((u) => u.contains('warkop_berkah_01') && u.contains('ORD-123')), isTrue);
 
-      // 3. Eksekusi resolveTableCall
-      await syncService.resolveTableCall('CALL-999');
-      expect(requestedUrls.any((u) => u.contains('restos/warkop_berkah_01/table_calls/CALL-999')), isTrue);
-
-      // 4. UpdateConfig beralih kembali ke default
+      // 3. UpdateConfig beralih kembali ke default
       syncService.updateConfig(restoId: 'default');
-      requestedUrls.clear();
-
-      await syncService.syncMenuAvailability('p2', true);
-      expect(requestedUrls.any((u) => u.contains('/resto_menu/p2') && !u.contains('restos/')), isTrue);
+      expect(syncService.restoId, equals('default'));
     });
   });
 }

@@ -7,6 +7,7 @@ import 'theme/app_theme.dart';
 import 'views/screens/lock_screen.dart';
 import 'views/screens/main_dashboard_screen.dart';
 import 'views/screens/onboarding_screen.dart';
+import 'views/screens/store_loading_screen.dart';
 
 /// Widget Utama Aplikasi POS Resto Digital
 class PosRestoApp extends StatelessWidget {
@@ -35,7 +36,17 @@ class PosRestoApp extends StatelessWidget {
               if (!auth.isAuthenticated) {
                 return const LockScreen();
               }
-              // Jika kasir sudah login dengan PIN yang valid, tampilkan Dashboard Utama dengan Sidebar modern
+
+              // Jika kasir/owner berhasil login namun data operasional toko belum dimuat ke RAM,
+              // tampilkan Layar Loading Interaktif dengan progress bar & status detail
+              if (!auth.isStoreDataLoaded) {
+                return StoreLoadingScreen(
+                  user: auth.currentUser!,
+                  onCompleted: () => auth.markStoreDataLoaded(),
+                );
+              }
+
+              // Jika kasir sudah login dan database sudah terhidrasi, tampilkan Dashboard Utama secara instan
               return const MainDashboardScreen();
             },
           );

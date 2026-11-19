@@ -14,10 +14,20 @@ class AuthProvider with ChangeNotifier {
 
   AuthProvider(this._storageService);
 
+  StorageService get storageService => _storageService;
+
   UserModel? get currentUser => _currentUser;
   bool get isLocked => _isLocked;
   bool get isAuthenticated => _currentUser != null && !_isLocked;
   String? get errorMessage => _errorMessage;
+
+  /// Status apakah database operasional toko (menu, pesanan, shift) sudah dimuat
+  bool get isStoreDataLoaded => _storageService.isStoreDataLoaded;
+
+  /// Memperbarui state UI setelah layar loading interaktif selesai memuat database toko
+  void markStoreDataLoaded() {
+    notifyListeners();
+  }
 
   /// Memeriksa apakah hak akses mode Owner sedang terbuka.
   /// Otomatis true jika akun yang login adalah Owner murni,
