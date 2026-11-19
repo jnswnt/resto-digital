@@ -180,6 +180,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       if (!mounted) return;
 
+      // Matikan status loading segera setelah respons server backend diterima
+      setState(() => _isLoading = false);
+
       if (authRes != null && authRes['success'] == true) {
         final isNew = authRes['isNewUser'] == true;
         final rawTenants = authRes['tenants'] as List<dynamic>? ?? [];
@@ -299,7 +302,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 style: const TextStyle(fontSize: 13, color: Colors.grey),
               ),
               const SizedBox(height: 16),
-              Flexible(
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: tenants.length,
@@ -356,6 +360,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ],
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dlgCtx);
+              _googleSignIn.signOut().catchError((_) => null);
+              setState(() => _isLoading = false);
+            },
+            child: const Text('Batal'),
+          ),
+        ],
       ),
     );
   }
