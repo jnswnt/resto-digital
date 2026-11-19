@@ -145,6 +145,7 @@ class SettingsProvider with ChangeNotifier {
   Future<UserModel> addStaff({
     required String name,
     required String pin,
+    String? username,
     String role = 'cashier',
   }) async {
     final salt = AuthService.generateSalt();
@@ -152,6 +153,7 @@ class SettingsProvider with ChangeNotifier {
     final newStaff = UserModel(
       id: 'user_${_uuid.v4().substring(0, 8)}',
       name: name,
+      username: username,
       role: role,
       pinHash: pinHash,
       salt: salt,
@@ -169,20 +171,26 @@ class SettingsProvider with ChangeNotifier {
   Future<UserModel> addCashier({
     required String name,
     required String pin,
+    String? username,
   }) async {
-    return addStaff(name: name, pin: pin, role: 'cashier');
+    return addStaff(name: name, pin: pin, username: username, role: 'cashier');
   }
 
-  /// Memperbarui data staf (Nama, Role, dan opsional ganti PIN)
+  /// Memperbarui data staf (Nama, Username, Role, dan opsional ganti PIN)
   Future<void> updateStaff({
     required String id,
     required String name,
+    String? username,
     String? role,
     String? newPin,
   }) async {
     final index = _users.indexWhere((u) => u.id == id);
     if (index >= 0) {
-      UserModel updated = _users[index].copyWith(name: name, role: role);
+      UserModel updated = _users[index].copyWith(
+        name: name,
+        username: username,
+        role: role,
+      );
       if (newPin != null && newPin.isNotEmpty) {
         final salt = AuthService.generateSalt();
         final pinHash = AuthService.hashPin(newPin, salt);
